@@ -111,4 +111,77 @@ object LayoutEngine {
     }
 
     fun removeDock(ws: Workspace, slot: Int): Workspace = ws.copy(dock = ws.dock.filterNot { it.slot == slot })
+
+    // ---- リサイズ・グリッド変更 ----
+
+    /** ウィジェットの大きさを変える。範囲外・衝突は拒否する。 */
+    fun resize(ws: Workspace, itemId: Long, rect: CellRect): Placement {
+        val item = ws.item(itemId) ?: return Placement.Blocked
+        if (!canPlace(ws, item.pageId, rect, ignoreItemId = itemId)) return Placement.Blocked
+        return Placement.Ok(ws.copy(items = ws.items.map { if (it.id == itemId) it.copy(rect = rect) else it }))
+    }
+
+    /**
+     * 全ページのグリッドを変える（plan.md §5）。項目は削除しない。
+     * 元の位置に収まる項目はそのまま、収まらない項目は同じページから順に空きを探して移し、
+     * どこにも無ければ末尾にページを足す。グリッドより大きいウィジェットはグリッドに合わせて縮める。
+     */
+    fun changeGrid(ws: Workspace, grid: GridSpec): GridChange {
+        val pageOrder = ws.orderedPages.mapIndexed { i, p -> p.id to i }.toMap()
+        var current = ws.copy(pages = ws.pages.map { it.copy(grid = grid) }, items = emptyList())
+        val pending = mutableListOf<WorkspaceItem>()
+        val resized = mutableSetOf<Long>()
+        val ordered = ws.items.sortedWith(compareBy({ pageOrder[it.pageId] ?: Int.MAX_VALUE }, { it.rect.y }, { it.rect.x }))
+        for (item in ordered) {
+            val rect = item.rect.copy(
+                width = item.rect.width.coerceAtMost(grid.columns),
+                height = item.rect.height.coerceAtMost(grid.rows),
+            )
+            if (rect != item.rect) resized += item.id
+            val fitted = item.copy(rect = rect)
+            when (val r = add(current, fitted)) {
+                is Placement.Ok -> current = r.workspace
+                Placement.Blocked -> pending += fitted
+            }
+        }
+        val moved = mutableSetOf<Long>()
+        for (item in pending) {
+            current = placeAnywhere(current, item, preferredPageId = item.pageId, grid = grid)
+            moved += item.id
+        }
+        return GridChange(current, moved, resized)
+    }
+
+    /** ドックの枠を減らす。外れたアプリはホームの空きへ移し、削除しない。 */
+    fun shrinkDock(ws: Workspace, dockSize: Int, newItemId: () -> Long, grid: GridSpec): Workspace {
+        val (keep, overflow) = ws.dock.partition { it.slot < dockSize }
+        var current = ws.copy(dock = keep)
+        for (slot in overflow.sortedBy { it.slot }) {
+            val item = WorkspaceItem(
+                newItemId(), ws.orderedPages.first().id, CellRect(0, 0, grid.iconSpan, grid.iconSpan),
+                ItemContent.App(slot.app),
+            )
+            current = placeAnywhere(current, item, preferredPageId = ws.orderedPages.first().id, grid = grid)
+        }
+        return current
+    }
+
+    private fun placeAnywhere(ws: Workspace, item: WorkspaceItem, preferredPageId: Long, grid: GridSpec): Workspace {
+        val found = findSpace(ws, preferredPageId, item.rect.width, item.rect.height, grid.subdivisions)
+        if (found != null) {
+            val (pageId, rect) = found
+            return (add(ws, item.copy(pageId = pageId, rect = rect)) as Placement.Ok).workspace
+        }
+        val (withPage, page) = addPage(ws, grid)
+        val rect = CellRect(0, 0, item.rect.width, item.rect.height)
+        return (add(withPage, item.copy(pageId = page.id, rect = rect)) as Placement.Ok).workspace
+    }
 }
+
+data class GridChange(
+    val workspace: Workspace,
+    /** 元の位置に収まらず、別の位置へ移した項目。 */
+    val movedItemIds: Set<Long>,
+    /** グリッドに合わせて縮めたウィジェット。 */
+    val resizedItemIds: Set<Long>,
+)

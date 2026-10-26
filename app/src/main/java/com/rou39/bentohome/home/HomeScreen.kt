@@ -1,11 +1,15 @@
 package com.rou39.bentohome.home
 
+import android.appwidget.AppWidgetProviderInfo
 import android.os.Bundle
 import android.util.SizeF
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -24,12 +28,14 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -40,47 +46,63 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.round
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.graphics.drawable.toBitmap
 import com.rou39.bentohome.badge.BadgeKey
 import com.rou39.bentohome.badge.BadgeRepository
 import com.rou39.bentohome.badge.BadgeState
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.AppAppearance
+import com.rou39.bentohome.data.BadgeMode
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.CellRect
 import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.layout.Page
+import com.rou39.bentohome.layout.ResizeLimits
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
-/** アイコン画像の大きさ。設定画面は段階3で追加する。 */
-private val DEFAULT_ICON_SIZE = 56.dp
 private val DOCK_HEIGHT = 88.dp
 
 /** 画面端でこの時間止まると、ドラッグ中にページを送る。 */
 private const val EDGE_FLIP_DELAY_MS = 600L
+
+private val OK_COLOR = Color(0x5534C759)
+private val NG_COLOR = Color(0x55FF3B30)
 
 @Composable
 fun HomeScreen(
@@ -90,9 +112,11 @@ fun HomeScreen(
     onRequestRole: () -> Unit,
     onOpenWidgetPicker: () -> Unit,
     onOpenSettings: () -> Unit,
+    onReconfigureWidget: (Int) -> Unit,
 ) {
     val ws by vm.workspace.collectAsState()
     val settings by vm.settings.collectAsState()
+    val appearances by vm.appearances.collectAsState()
     val apps by vm.catalog.apps.collectAsState()
     val byRef by vm.catalog.byRef.collectAsState()
     val badgeState by BadgeRepository.state.collectAsState()
@@ -108,9 +132,23 @@ fun HomeScreen(
     val controller = remember { HomeController(vm, drag, geometry, pagerState, scope) }
     controller.locked = settings.layoutLocked
     controller.dockVisible = settings.dockVisible
+    controller.style = settings.iconStyle()
+    controller.onReconfigureWidget = onReconfigureWidget
 
-    val badgeFor: (AppEntry?) -> Int? = { entry ->
-        entry?.let { (badgeState as? BadgeState.Counts)?.counts?.get(BadgeKey(it.packageName, it.ref.profileSerial)) }
+    val counts = (badgeState as? BadgeState.Counts)?.counts
+    val badgeFor: (AppEntry?) -> BadgeDisplay? = { entry ->
+        entry?.let {
+            val count = counts?.get(BadgeKey(it.packageName, it.ref.profileSerial)) ?: 0
+            if (count <= 0) {
+                null
+            } else {
+                when (appearances[it.ref]?.badgeMode ?: settings.badgeMode) {
+                    BadgeMode.NONE -> null
+                    BadgeMode.DOT -> BadgeDisplay.Dot
+                    BadgeMode.NUMBER -> BadgeDisplay.Count(count)
+                }
+            }
+        }
     }
     val hostIds = remember(workspace) { vm.widgetHost.hostIds() }
 
@@ -122,15 +160,19 @@ fun HomeScreen(
 
     LaunchedEffect(homeResetCount) { controller.resetForHome() }
     LaunchedEffect(pagerState) {
-        androidx.compose.runtime.snapshotFlow { pagerState.currentPage }.collect { vm.currentPageIndex = it }
+        snapshotFlow { pagerState.currentPage }.collect {
+            vm.currentPageIndex = it
+            controller.resizingItemId = null
+        }
     }
+    LaunchedEffect(vm) { vm.focusPage.collect { pagerState.animateScrollToPage(it) } }
     EdgeFlipEffect(controller)
     WallpaperScrollEffect(pagerState)
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(undo?.token) {
         val message = undo?.message ?: return@LaunchedEffect
-        val result = snackbar.showSnackbar(message, actionLabel = "元に戻す", duration = SnackbarDuration.Short)
+        val result = snackbar.showSnackbar(message, actionLabel = "元に戻す", duration = SnackbarDuration.Long)
         if (result == SnackbarResult.ActionPerformed) vm.undo()
     }
 
@@ -138,6 +180,7 @@ fun HomeScreen(
     BackHandler(enabled = true) {}
     BackHandler(enabled = controller.drawerOpen) { controller.drawerOpen = false }
     BackHandler(enabled = controller.backgroundMenuAt != null) { controller.backgroundMenuAt = null }
+    BackHandler(enabled = controller.resizingItemId != null) { controller.resizingItemId = null }
     BackHandler(enabled = drag.active) { drag.clear() }
 
     Box(Modifier.fillMaxSize()) {
@@ -154,7 +197,7 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
                     .onGloballyPositioned { geometry.gridArea = it.boundsInRoot() }
-                    .pointerInputSwipeUp(swipeThreshold) { controller.openDrawer() },
+                    .swipeUp(swipeThreshold) { controller.openDrawer() },
             ) {
                 HorizontalPager(
                     state = pagerState,
@@ -204,7 +247,7 @@ fun HomeScreen(
             )
         }
 
-        DragGhost(drag, byRef, vm)
+        DragGhost(controller, byRef)
 
         controller.backgroundMenuAt?.let { at ->
             Box(Modifier.offset { at.round() }) {
@@ -237,11 +280,21 @@ fun HomeScreen(
             }
         }
 
+        controller.appearanceTarget?.let { entry ->
+            AppAppearanceDialog(
+                entry = entry,
+                appearance = appearances[entry.ref] ?: AppAppearance(),
+                globalBadgeMode = settings.badgeMode,
+                onChange = { vm.setAppearance(entry.ref, it) },
+                onDismiss = { controller.appearanceTarget = null },
+            )
+        }
+
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing))
     }
 }
 
-private fun Modifier.pointerInputSwipeUp(threshold: Float, onSwipeUp: () -> Unit): Modifier =
+private fun Modifier.swipeUp(threshold: Float, onSwipeUp: () -> Unit): Modifier =
     this.then(
         Modifier.pointerInput(Unit) {
             var total = 0f
@@ -258,11 +311,11 @@ private fun Modifier.pointerInputSwipeUp(threshold: Float, onSwipeUp: () -> Unit
 
 /** ページ送りに合わせて壁紙を横に動かす（docs/design.md §6）。 */
 @Composable
-private fun WallpaperScrollEffect(pagerState: androidx.compose.foundation.pager.PagerState) {
-    val view = androidx.compose.ui.platform.LocalView.current
+private fun WallpaperScrollEffect(pagerState: PagerState) {
+    val view = LocalView.current
     val wallpaper = remember { android.app.WallpaperManager.getInstance(view.context) }
     LaunchedEffect(pagerState) {
-        androidx.compose.runtime.snapshotFlow {
+        snapshotFlow {
             pagerState.pageCount to (pagerState.currentPage + pagerState.currentPageOffsetFraction)
         }.collect { (count, position) ->
             val token = view.windowToken ?: return@collect
@@ -316,41 +369,58 @@ private fun WorkspacePage(
     page: Page?,
     byRef: Map<AppRef, AppEntry>,
     hostIds: Set<Int>,
-    badgeFor: (AppEntry?) -> Int?,
+    badgeFor: (AppEntry?) -> BadgeDisplay?,
     highlight: CellRect?,
     highlightValid: Boolean,
 ) {
     val vm = controller.vm
-    val grid = page?.grid ?: vm.defaultGrid
+    val grid = page?.grid ?: vm.currentGrid()
+    val style = controller.style
     var pageCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     BoxWithConstraints(Modifier.fillMaxSize().onGloballyPositioned { pageCoords = it }) {
         val cellW = maxWidth / grid.columns
         val cellH = maxHeight / grid.rows
         val density = LocalDensity.current
-        LaunchedEffect(cellW, cellH) {
+        LaunchedEffect(cellW, cellH, grid) {
             with(density) { vm.baseCellSizePx = cellW.toPx() * grid.subdivisions to cellH.toPx() * grid.subdivisions }
         }
-        val iconSize = min(DEFAULT_ICON_SIZE, min(cellW * grid.iconSpan, cellH * grid.iconSpan - 24.dp))
+        // アイコンは占有範囲からラベルの高さを引いた中に収める
+        val labelSpace = if (style.labelVisible) (style.labelSizeSp * 2).dp else 4.dp
+        val iconSize = min(style.iconSize, min(cellW * grid.iconSpan - 8.dp, cellH * grid.iconSpan - labelSpace))
 
-        // 背景: 項目の無い場所の長押しでメニュー
+        // 背景: 項目の無い場所の長押しでメニュー、タップでリサイズを終える
         Box(
             Modifier.fillMaxSize().pointerInput(Unit) {
-                detectTapGestures(onLongPress = { local ->
-                    pageCoords?.let { controller.backgroundMenuAt = it.localToRoot(local) }
-                })
+                detectTapGestures(
+                    onTap = { controller.resizingItemId = null },
+                    onLongPress = { local ->
+                        controller.resizingItemId = null
+                        pageCoords?.let { controller.backgroundMenuAt = it.localToRoot(local) }
+                    },
+                )
             },
         )
 
         if (page != null) {
             for (item in workspace.itemsOn(page.id)) {
-                androidx.compose.runtime.key(item.id) {
+                key(item.id) {
                     val dragged = (controller.drag.source as? DragSource.Item)?.itemId == item.id
                     Box(Modifier.cellPlacement(item.rect, cellW, cellH).alpha(if (dragged) 0.3f else 1f)) {
                         when (val content = item.content) {
-                            is ItemContent.App -> HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor)
-                            is ItemContent.Widget -> HomeWidgetCell(controller, item, content, content.widgetId in hostIds)
+                            is ItemContent.App ->
+                                HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor)
+                            is ItemContent.Widget ->
+                                HomeWidgetCell(controller, item, content, content.widgetId in hostIds)
                         }
                     }
+                }
+            }
+            val resizing = controller.resizingItemId?.let { workspace.item(it) }?.takeIf { it.pageId == page.id }
+            val resizingWidget = resizing?.content as? ItemContent.Widget
+            if (resizing != null && resizingWidget != null) {
+                val info = remember(resizingWidget.widgetId) { vm.widgetHost.info(resizingWidget.widgetId) }
+                if (info != null) {
+                    ResizeFrame(controller, resizing, vm.resizeLimits(info), info.resizeMode, cellW, cellH)
                 }
             }
         }
@@ -362,7 +432,7 @@ private fun WorkspacePage(
                     .cellPlacement(highlight, cellW, cellH)
                     .padding(2.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(if (highlightValid) Color(0x5534C759) else Color(0x55FF3B30)),
+                    .background(if (highlightValid) OK_COLOR else NG_COLOR),
             )
         }
     }
@@ -371,6 +441,94 @@ private fun WorkspacePage(
 private fun Modifier.cellPlacement(rect: CellRect, cellW: Dp, cellH: Dp): Modifier =
     this.offset(x = cellW * rect.x, y = cellH * rect.y).size(cellW * rect.width, cellH * rect.height)
 
+private enum class Edge { LEFT, TOP, RIGHT, BOTTOM }
+
+/**
+ * ウィジェットのリサイズ枠。辺のつまみを動かすと1マス刻みで大きさが変わり、置けない大きさは赤で示す。
+ * 指を離したときに置ける大きさなら確定する。提供元が許す方向・範囲だけ動かせる。
+ */
+@Composable
+private fun ResizeFrame(
+    controller: HomeController,
+    item: WorkspaceItem,
+    limits: ResizeLimits,
+    resizeMode: Int,
+    cellW: Dp,
+    cellH: Dp,
+) {
+    val vm = controller.vm
+    val grid = vm.currentGrid()
+    val sub = grid.subdivisions
+    val density = LocalDensity.current
+    val stepW = with(density) { cellW.toPx() } * sub
+    val stepH = with(density) { cellH.toPx() } * sub
+    var preview by remember(item.rect) { mutableStateOf(item.rect) }
+    val valid = preview == item.rect || vm.canResize(item.id, preview)
+
+    fun rectFor(edge: Edge, drag: Offset): CellRect {
+        val start = item.rect
+        val dx = (drag.x / stepW).roundToInt() * sub
+        val dy = (drag.y / stepH).roundToInt() * sub
+        return when (edge) {
+            Edge.RIGHT -> start.copy(width = limits.clampWidth(start.width + dx).coerceAtMost(grid.columns - start.x))
+            Edge.LEFT -> {
+                val w = limits.clampWidth(start.width - dx).coerceAtMost(start.right)
+                start.copy(x = start.right - w, width = w)
+            }
+            Edge.BOTTOM -> start.copy(height = limits.clampHeight(start.height + dy).coerceAtMost(grid.rows - start.y))
+            Edge.TOP -> {
+                val h = limits.clampHeight(start.height - dy).coerceAtMost(start.bottom)
+                start.copy(y = start.bottom - h, height = h)
+            }
+        }
+    }
+
+    Box(
+        Modifier
+            .cellPlacement(preview, cellW, cellH)
+            .border(2.dp, if (valid) Color.White else Color(0xFFFF3B30), RoundedCornerShape(16.dp))
+            .background(if (valid) Color(0x22FFFFFF) else NG_COLOR, RoundedCornerShape(16.dp)),
+    ) {
+        val horizontal = resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
+        val vertical = resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+        val edges = buildList {
+            if (horizontal) addAll(listOf(Edge.LEFT, Edge.RIGHT))
+            if (vertical) addAll(listOf(Edge.TOP, Edge.BOTTOM))
+        }
+        for (edge in edges) {
+            val align = when (edge) {
+                Edge.LEFT -> Alignment.CenterStart
+                Edge.RIGHT -> Alignment.CenterEnd
+                Edge.TOP -> Alignment.TopCenter
+                Edge.BOTTOM -> Alignment.BottomCenter
+            }
+            Box(
+                Modifier
+                    .align(align)
+                    .size(36.dp)
+                    .pointerInput(edge, item.rect) {
+                        var total = Offset.Zero
+                        detectDragGestures(
+                            onDragStart = { total = Offset.Zero },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                total += amount
+                                preview = rectFor(edge, total)
+                            },
+                            onDragEnd = {
+                                if (preview != item.rect && !vm.resizeWidget(item.id, preview)) preview = item.rect
+                            },
+                            onDragCancel = { preview = item.rect },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.size(16.dp).clip(CircleShape).background(Color.White))
+            }
+        }
+    }
+}
+
 @Composable
 private fun HomeAppCell(
     controller: HomeController,
@@ -378,10 +536,11 @@ private fun HomeAppCell(
     app: AppRef,
     entry: AppEntry?,
     iconSize: Dp,
-    badgeFor: (AppEntry?) -> Int?,
+    badgeFor: (AppEntry?) -> BadgeDisplay?,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
+    val style = controller.style
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier.fillMaxSize().launcherItemGestures(
@@ -398,7 +557,10 @@ private fun HomeAppCell(
             ),
         ),
     ) {
-        AppIconView(entry, controller.vm.iconCache, iconSize, badgeFor(entry))
+        AppIconView(
+            entry, controller.vm.iconCache, iconSize, style.shape, badgeFor(entry),
+            labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
+        )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false })
             if (!controller.locked) {
@@ -411,31 +573,55 @@ private fun HomeAppCell(
     }
 }
 
-/** アプリ情報・アンインストール。ホーム・ドック・一覧で共通。 */
+/** アプリショートカット・アプリ情報・アンインストール・外観の個別設定。ホーム・ドック・一覧で共通。 */
 @Composable
 fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit) {
     val context = LocalContext.current
     if (entry == null) return
+    val catalog = controller.vm.catalog
+    val density = context.resources.displayMetrics.densityDpi
+    val shortcuts by produceState<List<Pair<android.content.pm.ShortcutInfo, ImageBitmap?>>>(emptyList(), entry) {
+        value = withContext(Dispatchers.IO) {
+            catalog.shortcutsFor(entry).map { s ->
+                s to catalog.shortcutIcon(s, density)?.toBitmap(96, 96)?.asImageBitmap()
+            }
+        }
+    }
+    for ((shortcut, icon) in shortcuts) {
+        DropdownMenuItem(
+            text = { Text(shortcut.shortLabel?.toString() ?: shortcut.id) },
+            leadingIcon = icon?.let { { Image(it, contentDescription = null, modifier = Modifier.size(24.dp)) } },
+            onClick = {
+                close()
+                catalog.startShortcut(shortcut, null)
+            },
+        )
+    }
+    if (shortcuts.isNotEmpty()) HorizontalDivider()
     DropdownMenuItem(text = { Text("アプリ情報") }, onClick = {
         close()
-        controller.vm.catalog.openAppInfo(entry, null)
+        catalog.openAppInfo(entry, null)
     })
     if (!entry.isSystemApp) {
         DropdownMenuItem(text = { Text("アンインストール") }, onClick = {
             close()
-            context.startActivity(controller.vm.catalog.uninstallIntent(entry))
+            context.startActivity(catalog.uninstallIntent(entry))
         })
     }
+    DropdownMenuItem(text = { Text("外観の個別設定") }, onClick = {
+        close()
+        controller.appearanceTarget = entry
+    })
 }
 
 @Composable
 private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widget: ItemContent.Widget, onHost: Boolean) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
-    val widgetHost = controller.vm.widgetHost
-    val info = remember(widget.widgetId, onHost) { if (onHost) widgetHost.info(widget.widgetId) else null }
+    val vm = controller.vm
+    val info = remember(widget.widgetId, onHost) { if (onHost) vm.widgetHost.info(widget.widgetId) else null }
     val label = remember(info) {
-        info?.loadLabel(controller.vm.getApplication<android.app.Application>().packageManager) ?: "ウィジェット"
+        info?.loadLabel(vm.getApplication<android.app.Application>().packageManager) ?: "ウィジェット"
     }
     Box(
         Modifier
@@ -449,7 +635,7 @@ private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widg
                     spanX = item.rect.width,
                     spanY = item.rect.height,
                     entry = null,
-                    canDrag = true,
+                    canDrag = controller.resizingItemId != item.id,
                     onLongPress = { menuOpen = true },
                     onDragStarted = { menuOpen = false },
                 ),
@@ -467,12 +653,26 @@ private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widg
             WidgetHostSurface(controller, widget.widgetId)
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            val reconfigurable = info != null && info.configure != null &&
+                info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE != 0
+            if (reconfigurable) {
+                DropdownMenuItem(text = { Text("ウィジェットを設定") }, onClick = {
+                    menuOpen = false
+                    controller.onReconfigureWidget(widget.widgetId)
+                })
+            }
             if (controller.locked) {
                 DropdownMenuItem(text = { Text("配置はロック中です") }, onClick = { menuOpen = false })
             } else {
+                if (info != null && info.resizeMode != AppWidgetProviderInfo.RESIZE_NONE) {
+                    DropdownMenuItem(text = { Text("サイズ変更") }, onClick = {
+                        menuOpen = false
+                        controller.resizingItemId = item.id
+                    })
+                }
                 DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
                     menuOpen = false
-                    controller.vm.removeItem(item.id)
+                    vm.removeItem(item.id)
                 })
             }
         }
@@ -532,7 +732,7 @@ private fun DockBar(
     controller: HomeController,
     workspace: Workspace,
     byRef: Map<AppRef, AppEntry>,
-    badgeFor: (AppEntry?) -> Int?,
+    badgeFor: (AppEntry?) -> BadgeDisplay?,
     highlightSlot: Int?,
     highlightValid: Boolean,
 ) {
@@ -557,8 +757,8 @@ private fun DockBar(
                     .background(
                         when {
                             !highlighted -> Color.Transparent
-                            highlightValid -> Color(0x5534C759)
-                            else -> Color(0x55FF3B30)
+                            highlightValid -> OK_COLOR
+                            else -> NG_COLOR
                         },
                     ),
             ) {
@@ -574,12 +774,13 @@ private fun DockAppCell(
     slot: Int,
     app: AppRef,
     entry: AppEntry?,
-    badgeFor: (AppEntry?) -> Int?,
+    badgeFor: (AppEntry?) -> BadgeDisplay?,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
-    val span = controller.vm.defaultGrid.iconSpan
+    val span = controller.vm.currentGrid().iconSpan
     val dragged = (controller.drag.source as? DragSource.Dock)?.slot == slot
+    val style = controller.style
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier.fillMaxSize().alpha(if (dragged) 0.3f else 1f).launcherItemGestures(
@@ -596,7 +797,10 @@ private fun DockAppCell(
             ),
         ),
     ) {
-        AppIconView(entry, controller.vm.iconCache, DEFAULT_ICON_SIZE, badgeFor(entry), showLabel = false)
+        AppIconView(
+            entry, controller.vm.iconCache, min(style.iconSize, DOCK_HEIGHT - 16.dp), style.shape, badgeFor(entry),
+            labelSizeSp = null,
+        )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false })
             if (!controller.locked) {
@@ -610,10 +814,12 @@ private fun DockAppCell(
 }
 
 @Composable
-private fun DragGhost(drag: DragState, byRef: Map<AppRef, AppEntry>, vm: HomeViewModel) {
+private fun DragGhost(controller: HomeController, byRef: Map<AppRef, AppEntry>) {
+    val drag = controller.drag
     val visual = drag.visual ?: return
     val density = LocalDensity.current
-    val size = with(density) { androidx.compose.ui.unit.DpSize(drag.itemSize.width.toDp(), drag.itemSize.height.toDp()) }
+    val size = with(density) { DpSize(drag.itemSize.width.toDp(), drag.itemSize.height.toDp()) }
+    val style = controller.style
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -622,11 +828,12 @@ private fun DragGhost(drag: DragState, byRef: Map<AppRef, AppEntry>, vm: HomeVie
             .alpha(0.85f),
     ) {
         when (visual) {
-            is DragVisual.App -> AppIconView(byRef[visual.app], vm.iconCache, DEFAULT_ICON_SIZE, null, showLabel = false)
+            is DragVisual.App ->
+                AppIconView(byRef[visual.app], controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null)
             is DragVisual.Widget -> Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color(0x99FFFFFF)),
-            ) { Text(visual.label.toString(), color = Color.Black) }
+            ) { Text(visual.label, color = Color.Black) }
         }
     }
 }

@@ -141,4 +141,57 @@ class LayoutEngineTest {
         assertTrue(moved.dock.isEmpty())
         assertEquals(CellRect(2, 0, 2, 2), moved.item(5)!!.rect)
     }
+
+    private fun widget(id: Long, x: Int, y: Int, w: Int, h: Int, pageId: Long = 1) =
+        WorkspaceItem(id, pageId, CellRect(x, y, w, h), ItemContent.Widget(id.toInt() + 100, "p/.W"))
+
+    @Test
+    fun resizeRejectsCollisionAndOutOfBounds() {
+        val w = ws(widget(1, 0, 0, 4, 2), icon(2, 4, 0))
+        assertEquals(Placement.Blocked, LayoutEngine.resize(w, 1, CellRect(0, 0, 6, 2)))
+        assertEquals(Placement.Blocked, LayoutEngine.resize(w, 1, CellRect(0, 0, 4, 14)))
+        assertEquals(CellRect(0, 0, 4, 4), LayoutEngine.resize(w, 1, CellRect(0, 0, 4, 4)).ok().item(1)!!.rect)
+    }
+
+    @Test
+    fun changeGridKeepsFittingItemsInPlace() {
+        val w = ws(icon(1, 0, 0), icon(2, 2, 2))
+        val change = LayoutEngine.changeGrid(w, GridSpec(5, 7, 2))
+        assertEquals(CellRect(0, 0, 2, 2), change.workspace.item(1)!!.rect)
+        assertEquals(CellRect(2, 2, 2, 2), change.workspace.item(2)!!.rect)
+        assertTrue(change.movedItemIds.isEmpty())
+        assertTrue(change.workspace.pages.all { it.grid == GridSpec(5, 7, 2) })
+    }
+
+    @Test
+    fun changeGridMovesOverflowWithoutDeleting() {
+        // 4列→3列で、右端（小マス 6〜7）のアイコンは収まらない
+        val w = ws(icon(1, 0, 0), icon(2, 6, 0))
+        val change = LayoutEngine.changeGrid(w, GridSpec(3, 6, 2))
+        assertEquals(setOf(2L), change.movedItemIds)
+        assertEquals(2, change.workspace.items.size)
+        val moved = change.workspace.item(2)!!
+        assertTrue(LayoutEngine.canPlace(change.workspace, moved.pageId, moved.rect, ignoreItemId = 2))
+    }
+
+    @Test
+    fun changeGridShrinksOversizedWidgetsAndAddsPageWhenFull() {
+        val small = GridSpec(1, 1, 2)
+        val w = ws(widget(1, 0, 0, 8, 4), icon(2, 0, 4))
+        val change = LayoutEngine.changeGrid(w, small)
+        assertEquals(setOf(1L), change.resizedItemIds)
+        assertEquals(CellRect(0, 0, 2, 2), change.workspace.item(1)!!.rect)
+        // 1ページに1個しか入らないので、アイコンは新しいページへ
+        assertEquals(2, change.workspace.pages.size)
+        assertEquals(2, change.workspace.items.size)
+    }
+
+    @Test
+    fun shrinkDockMovesAppsToHome() {
+        val w = ws(dock = listOf(DockSlot(0, app), DockSlot(3, other)))
+        var next = 10L
+        val shrunk = LayoutEngine.shrinkDock(w, 3, { next++ }, grid)
+        assertEquals(listOf(0), shrunk.dock.map { it.slot })
+        assertEquals(other, (shrunk.items.single().content as ItemContent.App).app)
+    }
 }

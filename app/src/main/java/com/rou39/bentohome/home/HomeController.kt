@@ -6,7 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.layout.Workspace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -30,6 +32,16 @@ class HomeController(
     var backgroundMenuAt by mutableStateOf<Offset?>(null)
     var locked by mutableStateOf(false)
     var dockVisible by mutableStateOf(true)
+    var style by mutableStateOf(IconStyle(56.dp, IconShape.SYSTEM, true, 12))
+
+    /** リサイズ中のウィジェット項目。null ならリサイズしていない。 */
+    var resizingItemId by mutableStateOf<Long?>(null)
+
+    /** 外観の個別設定ダイアログの対象。 */
+    var appearanceTarget by mutableStateOf<AppEntry?>(null)
+
+    /** ウィジェットの設定画面を開く。Activity の結果受け取りが必要なので HomeActivity が設定する。 */
+    var onReconfigureWidget: (Int) -> Unit = {}
 
     /** ホーム操作のたびに増える。各項目のメニューを閉じるのに使う。 */
     var resetKey by mutableStateOf(0)
@@ -39,6 +51,8 @@ class HomeController(
         drawerOpen = false
         query = ""
         backgroundMenuAt = null
+        resizingItemId = null
+        appearanceTarget = null
         drag.clear()
         resetKey++
         scope.launch { pagerState.scrollToPage(0) }
@@ -92,7 +106,7 @@ class HomeController(
         val area = geometry.gridArea
         if (area.width <= 0f || !area.contains(p)) return DropTarget.None
         val pageIndex = pagerState.currentPage
-        val grid = ws.pageAt(pageIndex)?.grid ?: vm.defaultGrid
+        val grid = ws.pageAt(pageIndex)?.grid ?: vm.currentGrid()
         val cellW = area.width / grid.columns
         val cellH = area.height / grid.rows
         val anchorX = p.x - area.left - drag.grabFraction.x * cellW * drag.spanX

@@ -32,46 +32,58 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.IconShape
+import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.icon.IconCache
+import com.rou39.bentohome.icon.IconRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** アイコンの見た目の設定（plan.md §2 外観設定）。 */
+data class IconStyle(
+    val iconSize: Dp,
+    val shape: IconShape,
+    val labelVisible: Boolean,
+    val labelSizeSp: Int,
+)
+
+fun LauncherSettings.iconStyle() = IconStyle(iconSizeDp.dp, iconShape, labelVisible, labelSize.sp)
+
+/** 表示するバッジ。件数が 0 か、バッジを出さない設定なら null にする。 */
+sealed interface BadgeDisplay {
+    data object Dot : BadgeDisplay
+    data class Count(val count: Int) : BadgeDisplay
+}
+
 @Composable
-fun rememberAppIcon(entry: AppEntry?, size: Dp, cache: IconCache): ImageBitmap? {
+fun rememberAppIcon(entry: AppEntry?, size: Dp, shape: IconShape, cache: IconCache): ImageBitmap? {
     if (entry == null) return null
     val px = with(LocalDensity.current) { size.roundToPx() }
-    val key = IconCache.key(entry.ref.component, entry.ref.profileSerial, px)
+    val key = IconCache.key(entry.ref.component, entry.ref.profileSerial, px, shape)
     val bitmap by produceState(cache.get(key)?.asImageBitmap(), key, entry) {
         if (value == null) {
             value = withContext(Dispatchers.IO) {
-                entry.info.getIcon(0).toBitmap(px, px).also { cache.put(key, it) }.asImageBitmap()
+                IconRenderer.render(entry.info.getIcon(0), px, shape).also { cache.put(key, it) }.asImageBitmap()
             }
         }
     }
     return bitmap
 }
 
-private val labelStyle = TextStyle(
-    color = Color.White,
-    fontSize = 12.sp,
-    textAlign = TextAlign.Center,
-    shadow = Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 6f),
-)
-
 /**
  * アイコンとラベル。占有範囲（footprint）の内側に収め、はみ出して隣と重ねない（docs/design.md §5）。
- * entry が null のときは、見つからないアプリとして表示する。
+ * entry が null のときは、見つからないアプリとして表示する。labelSizeSp が null ならラベルを出さない。
  */
 @Composable
 fun AppIconView(
     entry: AppEntry?,
     cache: IconCache,
     iconSize: Dp,
-    badge: Int?,
+    shape: IconShape,
+    badge: BadgeDisplay?,
+    labelSizeSp: Int?,
     modifier: Modifier = Modifier,
-    showLabel: Boolean = true,
 ) {
     Column(
         modifier = modifier,
@@ -79,7 +91,7 @@ fun AppIconView(
         verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.size(iconSize)) {
-            val icon = rememberAppIcon(entry, iconSize, cache)
+            val icon = rememberAppIcon(entry, iconSize, shape, cache)
             when {
                 icon != null -> Image(icon, contentDescription = entry?.label, modifier = Modifier.fillMaxSize())
                 entry == null -> Box(
@@ -87,29 +99,44 @@ fun AppIconView(
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Color.DarkGray),
                 ) { Text("?", color = Color.White) }
             }
-            if (badge != null && badge > 0) {
-                Box(
+            when (badge) {
+                null -> Unit
+                BadgeDisplay.Dot -> Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(BADGE_COLOR),
+                )
+                is BadgeDisplay.Count -> Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .offset(x = 4.dp, y = (-4).dp)
                         .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFD93025))
+                        .background(BADGE_COLOR)
                         .padding(horizontal = 4.dp),
                 ) {
-                    Text(if (badge > 99) "99+" else badge.toString(), color = Color.White, fontSize = 10.sp)
+                    Text(if (badge.count > 99) "99+" else badge.count.toString(), color = Color.White, fontSize = 10.sp)
                 }
             }
         }
-        if (showLabel) {
+        if (labelSizeSp != null) {
             Spacer(Modifier.height(4.dp))
             Text(
                 entry?.label ?: "見つからないアプリ",
-                style = labelStyle,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = labelSizeSp.sp,
+                    textAlign = TextAlign.Center,
+                    shadow = Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 6f),
+                ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
+
+private val BADGE_COLOR = Color(0xFFD93025)

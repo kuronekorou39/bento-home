@@ -7,6 +7,8 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherActivityInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.graphics.drawable.Drawable
 import android.graphics.Rect
 import android.net.Uri
 import android.os.Handler
@@ -124,11 +126,39 @@ class AppCatalog(private val context: Context) {
             .onFailure { Log.w(TAG, "app info failed: ${entry.packageName}", it) }
     }
 
+    /**
+     * 長押しメニューに出すアプリショートカット（静的・動的）。既定のホームでないと取得できない。
+     * 静的なものを先に、それぞれ rank 順で最大 [MAX_SHORTCUTS] 件。
+     */
+    fun shortcutsFor(entry: AppEntry): List<ShortcutInfo> {
+        if (!launcherApps.hasShortcutHostPermission()) return emptyList()
+        val query = LauncherApps.ShortcutQuery()
+            .setPackage(entry.packageName)
+            .setActivity(entry.component)
+            .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC)
+        return runCatching { launcherApps.getShortcuts(query, entry.user).orEmpty() }
+            .onFailure { Log.w(TAG, "shortcuts failed: ${entry.packageName}", it) }
+            .getOrDefault(emptyList())
+            .filter { it.isEnabled }
+            .sortedWith(compareBy({ !it.isDeclaredInManifest }, { it.rank }))
+            .take(MAX_SHORTCUTS)
+    }
+
+    fun shortcutIcon(shortcut: ShortcutInfo, density: Int): Drawable? =
+        runCatching { launcherApps.getShortcutIconDrawable(shortcut, density) }.getOrNull()
+
+    fun startShortcut(shortcut: ShortcutInfo, sourceBounds: Rect?) {
+        runCatching { launcherApps.startShortcut(shortcut, sourceBounds, null) }
+            .onSuccess { Log.d(TAG, "shortcut launched: ${shortcut.`package`}") }
+            .onFailure { Log.w(TAG, "shortcut failed: ${shortcut.`package`}", it) }
+    }
+
     fun uninstallIntent(entry: AppEntry): Intent =
         Intent(Intent.ACTION_DELETE, Uri.fromParts("package", entry.packageName, null))
             .putExtra(Intent.EXTRA_USER, entry.user)
 
     private companion object {
         const val TAG = "AppCatalog"
+        const val MAX_SHORTCUTS = 4
     }
 }

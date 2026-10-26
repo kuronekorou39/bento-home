@@ -51,7 +51,7 @@ private val DRAWER_ICON_SIZE = 52.dp
 fun AppDrawer(
     controller: HomeController,
     apps: List<AppEntry>,
-    badgeFor: (AppEntry?) -> Int?,
+    badgeFor: (AppEntry?) -> BadgeDisplay?,
     modifier: Modifier = Modifier,
 ) {
     val query = controller.query
@@ -136,10 +136,11 @@ fun AppDrawer(
 }
 
 @Composable
-private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: Int?) {
+private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: BadgeDisplay?) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
-    val span = controller.vm.defaultGrid.iconSpan
+    val span = controller.vm.currentGrid().iconSpan
+    val style = controller.style
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -160,7 +161,11 @@ private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: Int?)
                 ),
             ),
     ) {
-        AppIconView(entry, controller.vm.iconCache, DRAWER_ICON_SIZE, badge, Modifier.padding(horizontal = 4.dp))
+        AppIconView(
+            entry, controller.vm.iconCache, DRAWER_ICON_SIZE, style.shape, badge,
+            labelSizeSp = style.labelSizeSp,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ホームに追加") }, onClick = {

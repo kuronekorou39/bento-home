@@ -53,3 +53,16 @@ data class DockEntity(
     val component: String,
     val profileSerial: Long,
 )
+
+/** アプリごとの外観（plan.md §2）。すべて既定値に戻したら行を消す。 */
+@Entity(tableName = "app_appearance", primaryKeys = ["component", "profileSerial"])
+data class AppAppearanceEntity(
+    val component: String,
+    val profileSerial: Long,
+    /** 使わなくなってもグレー表示にしない（段階4で使う）。 */
+    val keepColor: Boolean,
+    /** 使用頻度の集計から外す（段階4で使う）。 */
+    val excludeFromRanking: Boolean,
+    /** null なら全体の設定に従う。BadgeMode の名前。 */
+    val badgeMode: String?,
+)

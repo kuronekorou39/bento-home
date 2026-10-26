@@ -57,6 +57,7 @@ class HomeActivity : ComponentActivity() {
                         onRequestRole = ::requestRole,
                         onOpenWidgetPicker = { showPicker = true },
                         onOpenSettings = { startActivity(Intent(this@HomeActivity, SettingsActivity::class.java)) },
+                        onReconfigureWidget = { id -> widgetHost.startConfigure(this@HomeActivity, id, REQ_RECONFIGURE) },
                     )
                     if (showPicker) {
                         BackHandler { showPicker = false }
@@ -161,6 +162,9 @@ class HomeActivity : ComponentActivity() {
         const val TAG = "HomeActivity"
         const val NO_ID = -1
         const val REQ_CONFIGURE = 101
+
+        /** 配置済みウィジェットの設定し直し。結果に関わらず配置は変えない。 */
+        const val REQ_RECONFIGURE = 102
         const val KEY_PENDING = "pending_widget_id"
     }
 }

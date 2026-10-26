@@ -3,6 +3,7 @@ package com.rou39.bentohome
 import android.app.Application
 import android.content.Context
 import com.rou39.bentohome.catalog.AppCatalog
+import com.rou39.bentohome.data.AppearanceRepository
 import com.rou39.bentohome.data.BentoDatabase
 import com.rou39.bentohome.data.SettingsRepository
 import com.rou39.bentohome.data.WorkspaceRepository
@@ -33,6 +34,7 @@ class AppContainer(context: Context) {
     val database = BentoDatabase.create(context)
     val workspaceRepository = WorkspaceRepository(database.workspaceDao(), appScope)
     val settingsRepository = SettingsRepository(context)
+    val appearanceRepository = AppearanceRepository(database.appearanceDao())
 
     /** 段階1の検証で追加したウィジェット ID。初回起動時に Room へ移して空にする。 */
     val spikeWidgetStore = SpikeWidgetStore(context)

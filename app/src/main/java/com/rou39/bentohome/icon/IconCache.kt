@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.LruCache
+import com.rou39.bentohome.data.IconShape
 
 /**
  * アイコン画像のキャッシュ（docs/design.md §11 の最小版）。
@@ -28,6 +29,7 @@ class IconCache(context: Context) {
     }
 
     companion object {
-        fun key(component: String, profileSerial: Long, sizePx: Int) = "$component#$profileSerial@$sizePx"
+        fun key(component: String, profileSerial: Long, sizePx: Int, shape: IconShape) =
+            "$component#$profileSerial@$sizePx:${shape.name}"
     }
 }
