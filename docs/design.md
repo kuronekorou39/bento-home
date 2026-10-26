@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
-状態: 段階2まで実装済み。実機確認は `docs/spike-notes.md`（段階1）と `docs/stage2-notes.md`（段階2）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+状態: 段階3まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`（段階2）、`docs/stage3-notes.md`（段階3）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
 
 ## 1. 確定した判断（2026-10-26）
 
@@ -112,6 +112,7 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 - 提供元の `targetCellWidth/Height`（API 31+）は「1マス（base cell）」の数として解釈し、`×sub` で小マス数にする。未指定なら `minWidth/minHeight` を小マス寸法で割り上げ、sub の倍数に丸める。
 - 下限は `minResizeWidth/Height`、上限は `maxResizeWidth/Height`（API 31+、0 なら無制限）を小マス寸法で換算する。`resizeMode` が許す方向だけハンドルを出す。
+- リサイズはメニューの「サイズ変更」で枠を出し、辺のつまみで1マス刻みに変える。提供元の `resizeMode` が許す辺だけつまみを出し、`minResize`・`maxResize` を1マスの寸法で換算した範囲に収める。置けない大きさは赤で示し、指を離したときに置ける大きさなら確定する。
 - 配置・リサイズ・グリッド変更・インセット変化のたびに `AppWidgetHostView.updateAppWidgetSize(null, listOf(SizeF(wDp, hDp)))` を呼ぶ。初版は縦固定なので1サイズでよい。
 
 ## 6. ワークスペースの描画と操作
@@ -161,7 +162,7 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 - `LauncherApps.Callback` でインストール・更新・削除・利用可否変化を受け、カタログの Flow を更新し、`IconRepository` の該当キャッシュを無効化する。
 - アプリが削除されたらホーム・ドックから該当項目を外す。利用不可（一時的）では残す。
 - 起動は `startMainActivity(component, user, sourceBounds, options)`。例外なく呼べたときだけ `UsageRepository.recordLaunch` を呼ぶ。
-- ショートカット: `hasShortcutHostPermission()` が true のときだけ `getShortcuts` で静的・動的を取得し、長押しメニューの上部に最大4件表示。`startShortcut` で起動。ショートカットの起動も使用頻度に加算する。
+- ショートカット: `hasShortcutHostPermission()` が true のときだけ `getShortcuts` で静的・動的を取得し、長押しメニューの上部に最大4件表示。静的なものを先に、それぞれ rank 順。`startShortcut` で起動する。使用頻度への加算は段階4で入れる。
 
 ## 9. 通知バッジ
 
@@ -194,7 +195,7 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 ## 11. IconRepository
 
 - `LruCache<IconKey, Bitmap>`、上限は `ActivityManager.memoryClass` の 1/8 程度（バイト単位）。`IconKey = AppKey + sizePx + shape`。
-- Adaptive icon は前景・背景を合成し、設定の形状パスでクリップ。旧式アイコンは中立色の背景に余白付きで載せる。
+- 形は「端末の標準・円・角丸四角・四角」。端末の標準は OS のマスクをそのまま使う。それ以外は、adaptive icon の前景・背景の層を各辺 1/4 はみ出して描き、形のパスで切り抜く。旧式アイコンは白い背景に余白付きで載せる。
 - パッケージ変更、形状・サイズ設定の変更でキーが変わるか無効化される。
 - 読み込みは `Dispatchers.IO`、未ロード中はプレースホルダー。アプリ一覧の高速スクロールで詰まらないよう、画面に出る分だけ要求する。
 
@@ -204,13 +205,18 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 `exportSchema = true` でスキーマ JSON（`app/schemas/`）をリポジトリに入れ、マイグレーションテストの基準にする。
 
-- v1 は `workspace_page`、`workspace_item`、`dock_item` の3表。`app_appearance` は段階3、`usage_daily`・`usage_summary` は段階4でマイグレーションとして足す。
+- v1 は `workspace_page`、`workspace_item`、`dock_item` の3表。v2 で `app_appearance`（keepColor・excludeFromRanking・badgeMode）を自動マイグレーションで足した。`usage_daily`・`usage_summary` は段階4で足す。
+- `app_appearance` は plan.md の iconOverride・labelOverride を持たない。アイコンの差し替えは段階6の拡張で検討する。
+- マイグレーションの instrumented テストは、実機の配置を消さないよう保留している。`connectedAndroidTest` は終了時にアプリを削除するため。エミュレーターを用意したら追加する。
 - plan.md の `pinned` 列は使い道が無いので持たない。ページの表示順の列名は、SQL の予約語を避けて `position` とする。
 - `workspace_item.type` は `ICON` / `WIDGET`。`WIDGET` は `widgetId`、`widgetProvider`（ComponentName 文字列）、`profileSerial` を持つ。
 
 ### DataStore
 
-- 外観・機能設定を Preferences DataStore に置き、型付きの `Settings` データクラスに変換して公開。`schemaVersion` を持つ。
+- 外観・機能設定を Preferences DataStore に置き、型付きの `LauncherSettings` に変換して公開する。
+- 項目: 配置ロック、ドック表示、列数（3〜6）、行数（4〜8）、ドックの枠数（3〜6）、アイコンの大きさ（40〜72dp）と形、ラベルの表示と文字サイズ、バッジの表示方式。
+- マス目とドック枠の変更は設定画面で「適用」したときだけ書く。適用前に現在の配置から、移る項目・縮むウィジェット・ドックから外れるアプリの数を計算して見せる。
+- ホームは設定の変化を受けて `LayoutEngine.changeGrid`・`shrinkDock` で配置を組み直す。項目は削除せず、取り消せる。取り消したときは設定も配置に合わせて書き戻す。
 
 ### バックアップ
 
