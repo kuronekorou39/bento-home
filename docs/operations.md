@@ -65,18 +65,13 @@ adb shell pm grant com.rou39.bentohome android.permission.DUMP
 
 デバッグ版はパッケージ名を `com.rou39.bentohome.debug` にする。使用状況へのアクセスは OS の設定（特別なアプリアクセス → 使用状況へのアクセス）からも許可できる。
 
-### Shizuku（全プロセスの CPU・メモリ、端末の CPU 使用率）
+### 計測用プロセス（全プロセスの CPU・メモリ、端末の CPU 使用率）
 
-- Shizuku 13.6.0 を GitHub のリリースから入れた（署名者 `CN=Rikka`、証明書 SHA-256 `268b5590…db30`）。Play ストア版でもよい。
-- 端末の再起動のたびに起動し直す。端末だけで行うなら、Shizuku アプリの「ワイヤレスデバッグ」から起動する。PC がつながっていれば次のコマンドでも起動できる。
-
-```
-adb shell "$(adb shell pm path moe.shizuku.privileged.api | sed 's/package://;s/base.apk//')lib/arm64/libshizuku.so"
-```
-
-- 初回はモニター画面の「Shizuku を許可する」から許可する。許可した後は「Shizuku でまとめて許可する」で、上の2つの権限も付与できる。
-- Shizuku を後から起動したときに Bento が気づかない場合は、Bento を強制停止して開き直す。
-- 計測用のプロセスはモニター画面を表示している間だけ動く。
+- 外部アプリは使わない。Bento 自身の計測用プロセス（`monitor/priv/PrivilegedService`）を、シェル権限で起動する。
+- 起動部分は未実装（手で実装する予定）。実装したら、起動のコマンドをここに書く。
+- 起動した仕組みは、計測用プロセスの窓口を `AppContainer.privileged.connect(binder)` に渡す。画面側はそれだけで表示を始める。
+- `PrivilegedBridge.inUse` が false の間（モニター画面を閉じている間）は、プロセスを止めてよい。
+- 端末を再起動すると止まるので、そのたびに PC から起動し直す。
 
 ## バックアップと復元
 

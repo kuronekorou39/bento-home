@@ -66,7 +66,7 @@ data class MonitorState(
 class MonitorRepository(
     private val context: Context,
     private val scope: CoroutineScope,
-    val shizuku: ShizukuBridge,
+    private val privileged: PrivilegedBridge,
 ) {
     private val _state = MutableStateFlow(MonitorState())
     val state: StateFlow<MonitorState> = _state.asStateFlow()
@@ -101,10 +101,10 @@ class MonitorRepository(
     fun attach(detailed: Boolean): AutoCloseable {
         val token = Any()
         clients.update { it + (token to detailed) }
-        if (detailed) shizuku.acquire()
+        if (detailed) privileged.acquire()
         return AutoCloseable {
             clients.update { it - token }
-            if (detailed) shizuku.release()
+            if (detailed) privileged.release()
         }
     }
 
@@ -142,7 +142,7 @@ class MonitorRepository(
 
         var processes: List<ProcessLoad>? = null
         if (detailed) {
-            val service = shizuku.service.value
+            val service = privileged.service.value
             val text = service?.let { runCatching { it.snapshot() }.getOrNull() }
             if (text != null) {
                 val snap = ProcSnapshot.parse(text)
@@ -193,7 +193,7 @@ class MonitorRepository(
                 p.inputStream.bufferedReader().readText().also { p.waitFor() }
             }.getOrNull()
         } else {
-            shizuku.exec("dumpsys", "thermalservice")
+            privileged.exec("dumpsys", "thermalservice")
         }
         return text?.let { Temperatures.parse(it) }
     }

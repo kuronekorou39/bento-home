@@ -267,9 +267,9 @@ icon/          IconRepository, IconShaper
 data/          Room database, DAO, DataStore, Settings
 settings/      SettingsActivity と各画面
 backup/        BackupModel, Exporter, Importer
-monitor/       MonitorActivity, MonitorRepository, ShizukuBridge, AppStats, LoadMetrics
+monitor/       MonitorActivity, MonitorRepository, PrivilegedBridge, AppStats, LoadMetrics
                ProcSnapshot, Temperatures, AppRows                 <- 純粋 Kotlin
-monitor/priv/  PrivilegedService（Shizuku がシェル権限で起動する）
+monitor/priv/  PrivilegedService（シェル権限で起動する計測用プロセス。起動部分は未実装）
 ```
 
 ## 15. テスト方針

@@ -55,9 +55,9 @@ data class WidgetRow(val widgetId: Int, val label: String, val page: Int, val st
 class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     private val c = app.container
     private val pm = app.packageManager
-    val shizuku = c.shizuku
+    private val privileged = c.privileged
     val state = c.monitor.state
-    val shizukuStatus = shizuku.status
+    val privilegedStatus = privileged.status
     val widgetStats = c.widgetMetrics.stats
     val widgetMetricsSince = c.widgetMetrics.since
 
@@ -81,7 +81,6 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshPermissions() {
         _usageGranted.value = c.appStats.usageAccessGranted()
         _dumpGranted.value = c.monitor.hasDump()
-        shizuku.refresh()
     }
 
     fun refreshDaily() {
@@ -101,12 +100,12 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** シェル権限で、使用状況へのアクセスと温度の読み取りを Bento に付与する。 */
-    fun grantWithShizuku() {
+    /** 計測用プロセス（シェル権限）で、使用状況へのアクセスと温度の読み取りを Bento に付与する。 */
+    fun grantWithPrivileged() {
         viewModelScope.launch(Dispatchers.IO) {
             val pkg = getApplication<Application>().packageName
-            shizuku.exec("appops", "set", pkg, "GET_USAGE_STATS", "allow")
-            shizuku.exec("pm", "grant", pkg, Manifest.permission.DUMP)
+            privileged.exec("appops", "set", pkg, "GET_USAGE_STATS", "allow")
+            privileged.exec("pm", "grant", pkg, Manifest.permission.DUMP)
             withContext(Dispatchers.Main) {
                 refreshPermissions()
                 refreshDaily()
@@ -116,10 +115,8 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
 
     val packageName: String = app.packageName
 
-    fun shizukuLaunchIntent(): android.content.Intent? = pm.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-
     fun forceStop(packageName: String) {
-        viewModelScope.launch(Dispatchers.IO) { shizuku.exec("am", "force-stop", packageName) }
+        viewModelScope.launch(Dispatchers.IO) { privileged.exec("am", "force-stop", packageName) }
     }
 
     fun icon(packageName: String): ImageBitmap? = icons[packageName] ?: runCatching {
@@ -187,9 +184,8 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         val PURPOSES = mapOf(
             Manifest.permission.REQUEST_DELETE_PACKAGES to "長押しメニューの「アンインストール」で OS の確認画面を開くため",
             Manifest.permission.PACKAGE_USAGE_STATS to "アプリごとの使用時間・通信量・容量を表示するため",
-            Manifest.permission.DUMP to "温度センサーの値を読むため。adb か Shizuku で付与する",
+            Manifest.permission.DUMP to "温度センサーの値を読むため。adb で付与する",
             Manifest.permission.QUERY_ALL_PACKAGES to "プロセスの持ち主をアプリ名で表示するため",
-            "moe.shizuku.manager.permission.API_V23" to "Shizuku 経由で全プロセスの CPU・メモリを読むため",
         )
     }
 }

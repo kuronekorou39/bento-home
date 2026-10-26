@@ -160,7 +160,7 @@ private fun OverviewTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
         if (s.series[Metric.CPU].isNullOrEmpty()) {
             MetricChart(
                 "CPU 周波数", listOf(series("周波数", Metric.CPU_FREQ)), ::percent, now, windowMs, YRange.Fixed(0f, 100f),
-                note = "全コアの最大周波数に対する平均。使用率は Shizuku を有効にすると表示します",
+                note = "全コアの最大周波数に対する平均。使用率は計測用プロセスを起動すると表示します",
             )
         } else {
             MetricChart("CPU 使用率", listOf(series("CPU", Metric.CPU)), ::percent, now, windowMs, YRange.Fixed(0f, 100f),
@@ -191,7 +191,7 @@ private fun OverviewTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
         if (temps.isNotEmpty()) {
             MetricChart(
                 "温度", temps, ::celsius, now, windowMs, YRange.Fit,
-                note = if (temps.size == 1) "表面と CPU の温度は、温度の読み取り権限か Shizuku で表示します" else null,
+                note = if (temps.size == 1) "表面と CPU の温度は、温度の読み取り権限を付与すると表示します" else null,
             )
         }
         MetricChart(
@@ -211,34 +211,19 @@ private fun OverviewTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
 
 @Composable
 private fun AccessCard(vm: MonitorViewModel, open: (Intent) -> Unit) {
-    val status by vm.shizukuStatus.collectAsState()
+    val status by vm.privilegedStatus.collectAsState()
     val usage by vm.usageGranted.collectAsState()
     val dump by vm.dumpGranted.collectAsState()
-    if (status == ShizukuBridge.Status.READY && usage && dump) return
+    val connected = status == PrivilegedBridge.Status.READY
+    if (connected && usage && dump) return
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("表示できる情報を増やす", style = MaterialTheme.typography.titleSmall)
-            Text(
-                when (status) {
-                    ShizukuBridge.Status.NOT_INSTALLED ->
-                        "Shizuku を入れて起動すると、全プロセスの CPU・メモリ、端末の CPU 使用率、電池の電流を表示できます。"
-                    ShizukuBridge.Status.NOT_RUNNING ->
-                        "Shizuku が止まっています。端末の再起動後は Shizuku アプリで起動し直してください。"
-                    ShizukuBridge.Status.NO_PERMISSION -> "Shizuku の利用を Bento に許可してください。"
-                    ShizukuBridge.Status.CONNECTING -> "Shizuku に接続しています。"
-                    ShizukuBridge.Status.READY -> "Shizuku は使えます。"
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-            when (status) {
-                ShizukuBridge.Status.NOT_INSTALLED -> OutlinedButton(onClick = {
-                    open(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api")))
-                }) { Text("ストアで Shizuku を開く") }
-                ShizukuBridge.Status.NOT_RUNNING -> OutlinedButton(onClick = {
-                    vm.shizukuLaunchIntent()?.let(open)
-                }) { Text("Shizuku を開く") }
-                ShizukuBridge.Status.NO_PERMISSION -> Button(onClick = vm.shizuku::requestPermission) { Text("Shizuku を許可する") }
-                else -> {}
+            if (!connected) {
+                Text(
+                    "全プロセスの CPU・メモリと端末の CPU 使用率は、計測用プロセスを PC の adb から起動すると表示されます（docs/operations.md）。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             if (!usage || !dump) {
                 Text(
@@ -248,8 +233,8 @@ private fun AccessCard(vm: MonitorViewModel, open: (Intent) -> Unit) {
                     }.joinToString("、") + "が未許可です。",
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (status == ShizukuBridge.Status.READY) {
-                    Button(onClick = vm::grantWithShizuku) { Text("Shizuku でまとめて許可する") }
+                if (connected) {
+                    Button(onClick = vm::grantWithPrivileged) { Text("計測用プロセスでまとめて許可する") }
                 } else if (!usage) {
                     OutlinedButton(onClick = { open(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) {
                         Text("使用状況へのアクセスの設定を開く")
@@ -266,10 +251,10 @@ private fun AccessCard(vm: MonitorViewModel, open: (Intent) -> Unit) {
 @Composable
 private fun AppsTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
     val rows by vm.rows.collectAsState()
-    val status by vm.shizukuStatus.collectAsState()
+    val status by vm.privilegedStatus.collectAsState()
     val usage by vm.usageGranted.collectAsState()
     val storageLoading by vm.storageLoading.collectAsState()
-    val detailed = status == ShizukuBridge.Status.READY
+    val detailed = status == PrivilegedBridge.Status.READY
     var sort by rememberSaveable { mutableStateOf(if (detailed) AppSort.CPU else AppSort.SCREEN) }
     var selected by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -289,7 +274,7 @@ private fun AppsTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
                 }
             }
             val missing = when {
-                (sort == AppSort.CPU || sort == AppSort.MEMORY) && !detailed -> "CPU とメモリは Shizuku を有効にすると表示します（概要のタブから）"
+                (sort == AppSort.CPU || sort == AppSort.MEMORY) && !detailed -> "CPU とメモリは、計測用プロセスを起動すると表示します（docs/operations.md）"
                 sort != AppSort.CPU && sort != AppSort.MEMORY && !usage -> "使用状況へのアクセスを許可すると表示します（概要のタブから）"
                 sort == AppSort.STORAGE && storageLoading -> "容量を調べています…"
                 sort == AppSort.MEMORY -> "メモリは各プロセスの物理メモリ使用量（RSS）の合計。共有部分を重ねて数えるため、合計は実際より大きくなります"
@@ -443,7 +428,7 @@ private fun WidgetsTab(vm: MonitorViewModel) {
 
 @Composable
 private fun BentoTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
-    val status by vm.shizukuStatus.collectAsState()
+    val status by vm.privilegedStatus.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     val info by produceState<Transparency?>(null, tick, status) { value = vm.transparency() }
     LaunchedEffect(Unit) {
@@ -476,7 +461,7 @@ private fun BentoTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
                 }
             }
         }
-        Text("Shizuku: ${shizukuLabel(status)}", style = MaterialTheme.typography.bodyMedium)
+        Text("計測用プロセス（シェル権限）: ${privilegedLabel(status)}", style = MaterialTheme.typography.bodyMedium)
         Small("adb から許可する場合: adb shell appops set ${vm.packageName} GET_USAGE_STATS allow と adb shell pm grant ${vm.packageName} android.permission.DUMP")
 
         Heading("保存しているデータ")
@@ -513,12 +498,9 @@ private fun Small(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-private fun shizukuLabel(s: ShizukuBridge.Status) = when (s) {
-    ShizukuBridge.Status.NOT_INSTALLED -> "入っていません"
-    ShizukuBridge.Status.NOT_RUNNING -> "止まっています"
-    ShizukuBridge.Status.NO_PERMISSION -> "Bento への許可がありません"
-    ShizukuBridge.Status.CONNECTING -> "接続中"
-    ShizukuBridge.Status.READY -> "使えます（モニター表示中だけシェル権限のプロセスを動かします）"
+private fun privilegedLabel(s: PrivilegedBridge.Status) = when (s) {
+    PrivilegedBridge.Status.NOT_CONNECTED -> "起動していません"
+    PrivilegedBridge.Status.READY -> "接続中（モニター表示中だけ使います）"
 }
 
 private fun thermalLabel(status: Int) = when (status) {

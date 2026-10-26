@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /**
- * Shizuku がシェル権限（uid 2000）で起動するプロセスで動く。
+ * シェル権限（uid 2000）で起動したプロセスで動く。起動と Bento への受け渡しは別に用意する。
  * アプリの権限では読めない /proc の値をまとめて返す（docs/monitor.md）。
  * 形式は [com.rou39.bentohome.monitor.ProcSnapshot] が解析する。
  */

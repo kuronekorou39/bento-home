@@ -58,7 +58,7 @@ object AppRows {
             val pkg = packageOf(p, packagesForUid)
             val a = when {
                 pkg != null -> accFor(pkg, pkg, pkg)
-                // Shizuku で動かしている計測用のプロセス。シェル権限なので uid ではアプリに結び付かない
+                // Bento の計測用プロセス。シェル権限なので uid ではアプリに結び付かない
                 ownPackage.isNotEmpty() && p.name.startsWith("$ownPackage:") -> accFor("proc:own", null, "Bento の計測用プロセス")
                 else -> accFor("proc:${baseName(p.name)}", null, baseName(p.name))
             }

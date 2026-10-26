@@ -6,9 +6,9 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <!-- システムモニター（docs/monitor.md）。本人の端末で使う前提で、取れる情報を最大にする -->
-    <!-- アプリごとの使用時間・通信量・容量。設定画面か Shizuku・adb で許可する -->
+    <!-- アプリごとの使用時間・通信量・容量。OS の設定画面か adb で許可する -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
-    <!-- 温度センサーの値（dumpsys thermalservice）。Shizuku か adb で付与する -->
+    <!-- 温度センサーの値（dumpsys thermalservice）。adb で付与する -->
     <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" />
     <!-- プロセスの持ち主をアプリ名に直すため、起動できないアプリも含めて見る -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
@@ -64,15 +64,6 @@
             android:exported="false"
             android:label="@string/monitor_label"
             android:theme="@style/Theme.Bento.Settings" />
-
-        <!-- Shizuku から権限プロセスの Binder を受け取る -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:enabled="true"
-            android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <service
             android:name=".badge.BadgeListenerService"

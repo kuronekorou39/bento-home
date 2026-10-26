@@ -12,7 +12,7 @@ import com.rou39.bentohome.icon.IconCache
 import com.rou39.bentohome.monitor.AppStats
 import com.rou39.bentohome.monitor.MonitorRepository
 import com.rou39.bentohome.monitor.SelfMetrics
-import com.rou39.bentohome.monitor.ShizukuBridge
+import com.rou39.bentohome.monitor.PrivilegedBridge
 import com.rou39.bentohome.monitor.WidgetMetrics
 import com.rou39.bentohome.usage.UsageRepository
 import com.rou39.bentohome.widget.SpikeWidgetStore
@@ -47,8 +47,9 @@ class AppContainer(context: Context) {
     val appearanceRepository = AppearanceRepository(database.appearanceDao())
     val usageRepository = UsageRepository(database.usageDao(), appScope)
     val selfMetrics = SelfMetrics()
-    val shizuku = ShizukuBridge(context)
-    val monitor = MonitorRepository(context, appScope, shizuku)
+    /** 計測用プロセスとの接続。起動する仕組みはここに [PrivilegedBridge.connect] で窓口を渡す。 */
+    val privileged = PrivilegedBridge()
+    val monitor = MonitorRepository(context, appScope, privileged)
     val appStats = AppStats(context)
 
     /** 設定画面からホームへ復元を渡す。ホームが購読していなければ設定画面が直接保存する。 */
