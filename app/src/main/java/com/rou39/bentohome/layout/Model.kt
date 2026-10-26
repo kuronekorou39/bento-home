@@ -36,7 +36,14 @@ data class AppRef(val component: String, val profileSerial: Long) {
 
 sealed interface ItemContent {
     data class App(val app: AppRef) : ItemContent
-    data class Widget(val widgetId: Int, val provider: String) : ItemContent
+    /** widgetId が [NO_ID] なら、バックアップから復元した「再追加が必要」なウィジェット。 */
+    data class Widget(val widgetId: Int, val provider: String) : ItemContent {
+        val needsReAdd: Boolean get() = widgetId == NO_ID
+
+        companion object {
+            const val NO_ID = -1
+        }
+    }
 }
 
 data class WorkspaceItem(val id: Long, val pageId: Long, val rect: CellRect, val content: ItemContent)
@@ -67,7 +74,9 @@ data class Workspace(
     fun nextPageId(): Long = (pages.maxOfOrNull { it.id } ?: 0L) + 1
 
     val widgetIds: Set<Int>
-        get() = items.mapNotNullTo(HashSet()) { (it.content as? ItemContent.Widget)?.widgetId }
+        get() = items.mapNotNullTo(HashSet()) {
+            (it.content as? ItemContent.Widget)?.widgetId?.takeIf { id -> id != ItemContent.Widget.NO_ID }
+        }
 
     companion object {
         val EMPTY = Workspace(emptyList(), emptyList(), emptyList())

@@ -1,6 +1,7 @@
 package com.rou39.bentohome.usage
 
 import android.util.Log
+import com.rou39.bentohome.data.UsageDailyEntity
 import com.rou39.bentohome.data.UsageDao
 import com.rou39.bentohome.data.UsageSummaryEntity
 import com.rou39.bentohome.layout.AppRef
@@ -58,6 +59,16 @@ class UsageRepository(private val dao: UsageDao, private val appScope: Coroutine
     /** アンインストールされたアプリの記録を消す。入れ直したら観測をやり直す。 */
     fun forgetPackage(packageName: String, profileSerial: Long) {
         appScope.launch(Dispatchers.IO) { dao.deletePackage(packageName, profileSerial) }
+    }
+
+    /** バックアップから戻す。観測開始が無いアプリは今の時刻から観測する。 */
+    suspend fun replaceAll(all: Map<AppRef, AppUsage>) {
+        val now = System.currentTimeMillis()
+        lastRecorded.clear()
+        dao.replaceAll(
+            daily = all.flatMap { (ref, u) -> u.daily.map { (day, n) -> UsageDailyEntity(ref.component, ref.profileSerial, day, n) } },
+            summaries = all.map { (ref, u) -> UsageSummaryEntity(ref.component, ref.profileSerial, u.observedSince ?: now, u.lastLaunchAt) },
+        )
     }
 
     suspend fun clearHistory() {

@@ -39,7 +39,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.data.DrawerSort
@@ -144,7 +146,8 @@ fun AppDrawer(
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp),
+            // 大きな文字でも折り返さないよう、横にスクロールできるようにする
+            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         ) {
             for (option in DrawerSort.entries) {
                 FilterChip(
@@ -153,7 +156,7 @@ fun AppDrawer(
                     label = { Text(option.label, fontSize = 12.sp) },
                 )
             }
-            Text("${filtered.size} 件", color = Color.LightGray, fontSize = 12.sp)
+            Text("${filtered.size} 件", color = Color.LightGray, fontSize = 12.sp, maxLines = 1, softWrap = false)
         }
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),

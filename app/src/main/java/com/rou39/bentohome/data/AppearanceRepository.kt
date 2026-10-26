@@ -24,6 +24,18 @@ class AppearanceRepository(private val dao: AppearanceDao) {
         }
     }
 
+    suspend fun replaceAll(all: Map<AppRef, AppAppearance>) {
+        dao.replaceAll(all.filterValues { !it.isDefault }.map { (ref, a) -> toEntity(ref, a) })
+    }
+
+    private fun toEntity(app: AppRef, a: AppAppearance) = AppAppearanceEntity(
+        component = app.component,
+        profileSerial = app.profileSerial,
+        keepColor = a.keepColor,
+        excludeFromRanking = a.excludeFromRanking,
+        badgeMode = a.badgeMode?.name,
+    )
+
     suspend fun set(app: AppRef, appearance: AppAppearance) {
         if (appearance.isDefault) {
             dao.delete(app.component, app.profileSerial)

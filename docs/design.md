@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
-状態: 段階4まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`（段階2）、`docs/stage3-notes.md`（段階3）、`docs/stage4-notes.md`（段階4）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+状態: 段階5まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`〜`docs/stage5-notes.md`（段階2〜5）。運用手順は `docs/operations.md`。「実機で確認」とある項目は段階1の技術検証で結論を出す。
 
 ## 1. 確定した判断（2026-10-26）
 
@@ -121,6 +121,17 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 - 壁紙はウィンドウ背景で表示し、ページのスクロール量に応じて `WallpaperManager.setWallpaperOffsets` を呼ぶ（設定でオフ可能）。
 - ドックはページの外側に固定。ドロップ先として同じ衝突規則を使う（ドックは1行、スロット単位）。
 
+### 描画の負荷
+
+- ページャーのページ数とキーのラムダは `remember` で固定する。作り直すとページャーが状態を書き換え、ホーム画面が毎フレーム再コンポーズされる（`docs/stage5-notes.md`）。
+- 見えていないページのウィジェットと、アプリ一覧の下のウィジェットは View を `INVISIBLE` にする。提供元のアニメーションが止まり、待機中の描画が無くなる。
+
+### 読み上げ
+
+- アイコンは自前のジェスチャー処理なので、`semantics` で「開く」「メニューを開く」の操作を明示し、子要素をまとめて1つにする。
+- ラベルを表示しているときは画像に説明を付けず、名前を二重に読まない。バッジは「通知 N 件」、グレー表示は状態として「しばらく使っていません」を読む。
+- 背景の長押しと上スワイプの代わりに、ホームに「ホームのメニュー」「すべてのアプリ」のカスタム操作を付ける。ページ表示は「ページ x / n」と読む。
+
 ### ジェスチャーの優先順位
 
 | 入力 | 動作 |
@@ -226,9 +237,11 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 ### バックアップ
 
-- 書き出し形式は JSON: `{ schemaVersion, exportedAt, pages, items, dock, appearance, settings }`。`items` のウィジェットは `widgetId` を含めず、`widgetProvider` と footprint だけを書く。使用履歴は既定で含めない（オプション）。
+- 書き出し形式は JSON（kotlinx.serialization）: `{ format, schemaVersion, exportedAt, appVersion, settings, pages, items, dock, appearances, usage? }`。`items` のウィジェットは `widgetId` を含めず、`widgetProvider` と footprint だけを書く。使用履歴は既定で含めない（オプション）。未知の項目は無視し、形式名が違うファイルと新しすぎる版は読まない。
 - `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT` で保存先を選ぶ。
-- 読み込み時はプレビュー（ページ数・項目数・再追加が必要なウィジェット数）を見せてから置き換える。ウィジェットは「再追加が必要」のプレースホルダーとして復元する。
+- 読み込み時はプレビュー（ページ数・項目数・再追加が必要なウィジェット数・この端末に無いアプリ数）を見せてから置き換える。この端末に無いアプリは置かない。
+- ウィジェットは `widgetId = -1` の「再追加が必要」な項目として復元する。タップすると提供元を探して追加の流れをやり直し、同じ項目の ID を置き換える。
+- ホームが動いていれば復元をホームの ViewModel に渡し、配置の変更として取り消せるようにする。設定・外観の個別設定・使用履歴は置き換えるだけで、取り消しの対象外。
 - マニフェストは `allowBackup="false"`。OS のクラウドバックアップ・端末間転送の対象外にする。
 
 ## 13. アプリ一覧

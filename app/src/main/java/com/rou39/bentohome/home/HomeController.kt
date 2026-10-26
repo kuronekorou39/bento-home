@@ -43,6 +43,9 @@ class HomeController(
     /** ウィジェットの設定画面を開く。Activity の結果受け取りが必要なので HomeActivity が設定する。 */
     var onReconfigureWidget: (Int) -> Unit = {}
 
+    /** 「再追加が必要」なウィジェットを追加し直す。HomeActivity が設定する。 */
+    var onReAddWidget: (itemId: Long, provider: String) -> Unit = { _, _ -> }
+
     /** ホーム操作のたびに増える。各項目のメニューを閉じるのに使う。 */
     var resetKey by mutableStateOf(0)
         private set

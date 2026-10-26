@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.room)
+}
+
+// リリース署名の鍵情報。鍵とパスワードはソース管理に入れない（plan.md §8）。
+// プロジェクト直下の keystore.properties（.gitignore 済み）が無ければ、リリースは未署名でビルドする。
+val keystoreProperties = rootProject.file("keystore.properties").takeIf { it.exists() }?.let { f ->
+    Properties().apply { f.inputStream().use { load(it) } }
 }
 
 android {
@@ -17,11 +26,23 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (keystoreProperties != null) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
         }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -52,6 +73,7 @@ dependencies {
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
     implementation(libs.datastore.preferences)
+    implementation(libs.kotlinx.serialization.json)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.foundation)
@@ -64,7 +86,7 @@ dependencies {
 }
 
 // plan.md §6: リリース APK に INTERNET 権限を含めない。マージ後のマニフェストで検査する。
-val checkNoInternetPermission by tasks.registering {
+val checkNoInternetPermission = tasks.register("checkNoInternetPermission") {
     val manifest = layout.buildDirectory.file("intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml")
     dependsOn("processReleaseMainManifest")
     inputs.file(manifest)

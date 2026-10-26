@@ -106,6 +106,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             catalog.events.filterIsInstance<PackageEvent.Removed>().collect(::onPackageRemoved)
         }
+        viewModelScope.launch { c.restoreRequests.collect(::applyRestore) }
     }
 
     override fun onCleared() {
@@ -209,6 +210,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             WorkspaceItem(0, pageId, rect, ItemContent.Widget(widgetId, info.provider.flattenToString()))
         }
         commit(next, message = "ウィジェットを追加しました", focusItemId = itemId)
+    }
+
+    /** バックアップから復元した「再追加が必要」なウィジェットを、新しく割り当てた ID で置き換える。 */
+    fun replaceWidget(itemId: Long, widgetId: Int, info: AppWidgetProviderInfo) {
+        val ws = _workspace.value ?: return
+        val item = ws.item(itemId) ?: return
+        val next = ws.copy(
+            items = ws.items.map {
+                if (it.id == itemId) it.copy(content = ItemContent.Widget(widgetId, info.provider.flattenToString())) else it
+            },
+        )
+        commit(next, message = "ウィジェットを追加し直しました", focusItemId = item.id)
+    }
+
+    /** 設定画面からの復元。配置は取り消せる。設定・外観の個別設定・使用履歴は置き換える。 */
+    private suspend fun applyRestore(plan: com.rou39.bentohome.backup.RestorePlan) {
+        val current = _workspace.value ?: return
+        commit(plan.workspace, message = "バックアップから復元しました", removedWidgetIds = current.widgetIds)
+        com.rou39.bentohome.backup.BackupService.applyNonLayout(c, plan)
     }
 
     fun removeItem(itemId: Long) {

@@ -17,6 +17,9 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -39,6 +42,17 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
     val cb by rememberUpdatedState(callbacks)
     this
         .onGloballyPositioned { holder.coords = it }
+        // 自前のジェスチャー処理は読み上げから操作できないので、開く・メニューの操作を明示する
+        .semantics(mergeDescendants = true) {
+            onClick(label = "開く") {
+                cb.onTap(holder.windowRect())
+                true
+            }
+            onLongClick(label = "メニューを開く") {
+                cb.onLongPress()
+                true
+            }
+        }
         .pointerInput(key) {
             var dragging = false
             try {
@@ -117,6 +131,13 @@ fun Modifier.widgetGestures(
     val pager by rememberUpdatedState(pagerDrag)
     this
         .onGloballyPositioned { holder.coords = it }
+        // ウィジェットの中身は提供元の読み上げに任せ、ホーム側はメニューの操作だけ足す
+        .semantics {
+            onLongClick(label = "ウィジェットのメニューを開く") {
+                cb.onLongPress()
+                true
+            }
+        }
         .pointerInput(key) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)

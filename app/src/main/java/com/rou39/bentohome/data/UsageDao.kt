@@ -57,6 +57,24 @@ abstract class UsageDao {
     @Query("UPDATE usage_summary SET lastLaunchAt = NULL, observedSince = :now")
     protected abstract suspend fun restartObservation(now: Long)
 
+    @Query("DELETE FROM usage_summary")
+    protected abstract suspend fun deleteAllSummaries()
+
+    @Insert
+    protected abstract suspend fun insertDaily(rows: List<UsageDailyEntity>)
+
+    @Insert
+    protected abstract suspend fun insertSummaries(rows: List<UsageSummaryEntity>)
+
+    /** バックアップから使用履歴を戻す。 */
+    @Transaction
+    open suspend fun replaceAll(daily: List<UsageDailyEntity>, summaries: List<UsageSummaryEntity>) {
+        deleteAllDaily()
+        deleteAllSummaries()
+        insertDaily(daily)
+        insertSummaries(summaries)
+    }
+
     /** 履歴を消し、観測をやり直す。消した直後に全アプリを「未使用」と判定しない。 */
     @Transaction
     open suspend fun clearHistory(now: Long) {

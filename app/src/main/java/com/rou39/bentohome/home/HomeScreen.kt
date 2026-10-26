@@ -69,6 +69,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
@@ -116,6 +121,7 @@ fun HomeScreen(
     onOpenWidgetPicker: () -> Unit,
     onOpenSettings: () -> Unit,
     onReconfigureWidget: (Int) -> Unit,
+    onReAddWidget: (itemId: Long, provider: String) -> Unit,
 ) {
     val ws by vm.workspace.collectAsState()
     val settings by vm.settings.collectAsState()
@@ -128,17 +134,21 @@ fun HomeScreen(
     val now by vm.now.collectAsState()
 
     val workspace = ws ?: return
-    val pages = workspace.orderedPages
+    // ページ数とキーのラムダは固定する。再コンポーズのたびに作り直すと、ページャーが状態を書き換えて
+    // HomeScreen がまた再コンポーズされ、待機中も毎フレーム描き直し続ける（docs/stage5-notes.md）
+    val pages = remember(workspace) { workspace.orderedPages }
     val drag = remember { DragState() }
     val geometry = remember { HomeGeometry() }
-    val extraPage = drag.active
-    val pagerState = rememberPagerState { pages.size + if (extraPage) 1 else 0 }
+    val pageCount by rememberUpdatedState(pages.size + if (drag.active) 1 else 0)
+    val pagerState = rememberPagerState(pageCount = remember { { pageCount } })
+    val pageKey: (Int) -> Any = remember(pages) { { index -> pages.getOrNull(index)?.id ?: -1L } }
     val scope = rememberCoroutineScope()
     val controller = remember { HomeController(vm, drag, geometry, pagerState, scope) }
     controller.locked = settings.layoutLocked
     controller.dockVisible = settings.dockVisible
     controller.style = settings.iconStyle()
     controller.onReconfigureWidget = onReconfigureWidget
+    controller.onReAddWidget = onReAddWidget
 
     val counts = (badgeState as? BadgeState.Counts)?.counts
     val badgeFor: (AppEntry?) -> BadgeDisplay? = { entry ->
@@ -213,15 +223,32 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
                     .onGloballyPositioned { geometry.gridArea = it.boundsInRoot() }
-                    .swipeUp(swipeThreshold) { controller.openDrawer() },
+                    .swipeUp(swipeThreshold) { controller.openDrawer() }
+                    // 背景の長押し・上スワイプは読み上げ中に使えないので、同じ操作を用意する
+                    .semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction("ホームのメニュー") {
+                                controller.backgroundMenuAt = geometry.gridArea.center
+                                true
+                            },
+                            CustomAccessibilityAction("すべてのアプリ") {
+                                controller.openDrawer()
+                                true
+                            },
+                        )
+                    },
             ) {
                 HorizontalPager(
                     state = pagerState,
                     beyondViewportPageCount = pages.size + 1,
-                    key = { index -> pages.getOrNull(index)?.id ?: -1L },
+                    key = pageKey,
                     modifier = Modifier.fillMaxSize(),
                 ) { index ->
                     val page = pages.getOrNull(index)
+                    // 見えていないページ・一覧の下のウィジェットは View を非表示にして、提供元のアニメーションを止める
+                    val pageVisible by remember(index) {
+                        derivedStateOf { pagerState.layoutInfo.visiblePagesInfo.any { it.index == index } }
+                    }
                     val highlight = (target as? DropTarget.Cell)?.takeIf { it.pageIndex == index }
                         ?.let { CellRect(it.x, it.y, drag.spanX, drag.spanY) }
                     WorkspacePage(
@@ -234,6 +261,7 @@ fun HomeScreen(
                         grayFor = homeGrayFor,
                         highlight = highlight,
                         highlightValid = targetValid,
+                        widgetsVisible = pageVisible && !controller.drawerOpen,
                     )
                 }
             }
@@ -398,6 +426,7 @@ private fun WorkspacePage(
     grayFor: (AppEntry?) -> GrayReason?,
     highlight: CellRect?,
     highlightValid: Boolean,
+    widgetsVisible: Boolean,
 ) {
     val vm = controller.vm
     val grid = page?.grid ?: vm.currentGrid()
@@ -411,7 +440,8 @@ private fun WorkspacePage(
             with(density) { vm.baseCellSizePx = cellW.toPx() * grid.subdivisions to cellH.toPx() * grid.subdivisions }
         }
         // アイコンは占有範囲からラベルの高さを引いた中に収める
-        val labelSpace = if (style.labelVisible) (style.labelSizeSp * 2).dp else 4.dp
+        // ラベルの高さは端末の文字の大きさに合わせて見積もる
+        val labelSpace = if (style.labelVisible) (style.labelSizeSp * 2 * density.fontScale).dp else 4.dp
         val iconSize = min(style.iconSize, min(cellW * grid.iconSpan - 8.dp, cellH * grid.iconSpan - labelSpace))
 
         // 背景: 項目の無い場所の長押しでメニュー、タップでリサイズを終える
@@ -436,7 +466,7 @@ private fun WorkspacePage(
                             is ItemContent.App ->
                                 HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor, grayFor)
                             is ItemContent.Widget ->
-                                HomeWidgetCell(controller, item, content, content.widgetId in hostIds)
+                                HomeWidgetCell(controller, item, content, content.widgetId in hostIds, widgetsVisible)
                         }
                     }
                 }
@@ -648,7 +678,13 @@ fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit
 }
 
 @Composable
-private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widget: ItemContent.Widget, onHost: Boolean) {
+private fun HomeWidgetCell(
+    controller: HomeController,
+    item: WorkspaceItem,
+    widget: ItemContent.Widget,
+    onHost: Boolean,
+    visible: Boolean,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
     val vm = controller.vm
@@ -678,12 +714,18 @@ private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widg
         if (info == null) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color(0xAA303030)),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xAA303030))
+                    .clickable(enabled = !controller.locked && widget.provider.isNotEmpty()) {
+                        controller.onReAddWidget(item.id, widget.provider)
+                    },
             ) {
-                Text("ウィジェットの再追加が必要", color = Color.White, fontSize = 12.sp)
+                Text("タップしてウィジェットを追加し直す", color = Color.White, fontSize = 12.sp)
             }
         } else {
-            WidgetHostSurface(controller, widget.widgetId)
+            WidgetHostSurface(controller, widget.widgetId, visible)
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val reconfigurable = info != null && info.configure != null &&
@@ -713,7 +755,7 @@ private fun HomeWidgetCell(controller: HomeController, item: WorkspaceItem, widg
 }
 
 @Composable
-private fun WidgetHostSurface(controller: HomeController, widgetId: Int) {
+private fun WidgetHostSurface(controller: HomeController, widgetId: Int, visible: Boolean) {
     val widgetHost = controller.vm.widgetHost
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val view = remember(widgetId) { widgetHost.viewFor(widgetId) }
@@ -725,6 +767,7 @@ private fun WidgetHostSurface(controller: HomeController, widgetId: Int) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { (view.parent as? ViewGroup)?.removeView(view); view },
+            update = { it.visibility = if (visible) android.view.View.VISIBLE else android.view.View.INVISIBLE },
         )
     }
 }
@@ -735,7 +778,9 @@ private fun PageIndicator(count: Int, current: Int, onOpenDrawer: () -> Unit) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.align(Alignment.Center),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .clearAndSetSemantics { contentDescription = "ページ ${current + 1} / $count" },
         ) {
             repeat(count) { i ->
                 Box(
@@ -754,7 +799,8 @@ private fun PageIndicator(count: Int, current: Int, onOpenDrawer: () -> Unit) {
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .padding(end = 12.dp)
-                .clickable(onClick = onOpenDrawer)
+                .clickable(onClickLabel = "開く", onClick = onOpenDrawer)
+                .semantics { contentDescription = "すべてのアプリ" }
                 .padding(horizontal = 12.dp),
         )
     }

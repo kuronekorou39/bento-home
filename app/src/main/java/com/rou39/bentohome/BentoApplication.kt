@@ -15,6 +15,8 @@ import com.rou39.bentohome.widget.WidgetHostController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import com.rou39.bentohome.backup.RestorePlan
 import kotlinx.coroutines.launch
 
 class BentoApplication : Application() {
@@ -38,6 +40,9 @@ class AppContainer(context: Context) {
     val settingsRepository = SettingsRepository(context)
     val appearanceRepository = AppearanceRepository(database.appearanceDao())
     val usageRepository = UsageRepository(database.usageDao(), appScope)
+
+    /** 設定画面からホームへ復元を渡す。ホームが購読していなければ設定画面が直接保存する。 */
+    val restoreRequests = MutableSharedFlow<RestorePlan>()
 
     /** 段階1の検証で追加したウィジェット ID。初回起動時に Room へ移して空にする。 */
     val spikeWidgetStore = SpikeWidgetStore(context)

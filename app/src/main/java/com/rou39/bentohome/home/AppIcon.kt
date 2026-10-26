@@ -28,6 +28,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -90,7 +94,9 @@ fun AppIconView(
     gray: Boolean = false,
 ) {
     Column(
-        modifier = modifier,
+        modifier = modifier.semantics {
+            if (gray) stateDescription = "しばらく使っていません"
+        },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -100,7 +106,8 @@ fun AppIconView(
                 // グレー表示は彩度を落とすだけ。ラベルの読みやすさとタップ領域は変えない（plan.md §4）
                 icon != null -> Image(
                     icon,
-                    contentDescription = entry?.label,
+                    // ラベルを表示しているときは、名前を二重に読まないよう画像には説明を付けない
+                    contentDescription = if (labelSizeSp == null) entry?.label else null,
                     modifier = Modifier.fillMaxSize(),
                     colorFilter = if (gray) GRAY_FILTER else null,
                     alpha = if (gray) GRAY_ALPHA else 1f,
@@ -114,6 +121,7 @@ fun AppIconView(
                 null -> Unit
                 BadgeDisplay.Dot -> Box(
                     Modifier
+                        .semantics { contentDescription = "通知あり" }
                         .align(Alignment.TopEnd)
                         .size(12.dp)
                         .clip(CircleShape)
@@ -122,6 +130,7 @@ fun AppIconView(
                 is BadgeDisplay.Count -> Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
+                        .clearAndSetSemantics { contentDescription = "通知 ${badge.count} 件" }
                         .align(Alignment.TopEnd)
                         .offset(x = 4.dp, y = (-4).dp)
                         .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)

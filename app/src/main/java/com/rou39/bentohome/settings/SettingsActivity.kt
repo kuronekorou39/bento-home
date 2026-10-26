@@ -48,6 +48,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import com.rou39.bentohome.backup.BackupService
+import com.rou39.bentohome.backup.RestorePlan
+import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.badge.BadgeListenerService
 import com.rou39.bentohome.container
 import com.rou39.bentohome.data.BadgeMode
@@ -64,6 +70,39 @@ class SettingsActivity : ComponentActivity() {
     private val settingsRepo by lazy { container.settingsRepository }
     private val workspaceRepo by lazy { container.workspaceRepository }
     private val usageRepo by lazy { container.usageRepository }
+    private val backup by lazy { BackupService(this, container) }
+
+    private var includeUsage by mutableStateOf(false)
+    private var restorePlan by mutableStateOf<RestorePlan?>(null)
+
+    private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            runCatching { backup.export(uri, includeUsage) }
+                .onSuccess { toast("書き出しました") }
+                .onFailure { toast("書き出せませんでした: ${it.message}") }
+        }
+    }
+
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            runCatching { backup.read(uri) }
+                .onSuccess { restorePlan = it }
+                .onFailure { toast("読み込めませんでした: ${it.message}") }
+        }
+    }
+
+    private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+
+    private fun describe(plan: RestorePlan): String = buildString {
+        append("ページ ${plan.workspace.pages.size}、")
+        append("ホームとドックのアプリ ${plan.workspace.items.count { it.content is ItemContent.App } + plan.workspace.dock.size}、")
+        append("ウィジェット ${plan.widgetsToReAdd}（追加し直しが必要）を復元します。")
+        if (plan.skippedApps > 0) append("この端末に無いアプリ ${plan.skippedApps} 個は復元しません。")
+        if (plan.usage != null) append("使用履歴も置き換えます。")
+        append("今の配置・設定・外観の個別設定は置き換わります。")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -155,6 +194,23 @@ class SettingsActivity : ComponentActivity() {
                         }
 
                         HorizontalDivider()
+                        Section("バックアップ")
+                        Text(
+                            "配置・設定・外観の個別設定をファイルに書き出し、読み込んで戻せます。保存先は自分で選びます。" +
+                                "ウィジェットは端末ごとに登録し直す必要があるため、読み込むと「追加し直す」表示になります。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        SwitchRow("使用履歴も含める", includeUsage) { includeUsage = it }
+                        Button(
+                            onClick = { exportLauncher.launch("bento-home-${java.time.LocalDate.now()}.json") },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("書き出す") }
+                        OutlinedButton(
+                            onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("読み込む") }
+
+                        HorizontalDivider()
                         Section("ホームアプリ")
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) },
@@ -162,6 +218,24 @@ class SettingsActivity : ComponentActivity() {
                         ) {
                             Text("既定のホームアプリを変更（元のホームへ戻す）")
                         }
+                    }
+                    restorePlan?.let { plan ->
+                        AlertDialog(
+                            onDismissRequest = { restorePlan = null },
+                            title = { Text("バックアップから復元しますか") },
+                            text = { Text(describe(plan)) },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    restorePlan = null
+                                    scope.launch {
+                                        runCatching { backup.apply(plan) }
+                                            .onSuccess { toast("復元しました。ホームで取り消せます（配置のみ）") }
+                                            .onFailure { toast("復元できませんでした: ${it.message}") }
+                                    }
+                                }) { Text("置き換える") }
+                            },
+                            dismissButton = { TextButton(onClick = { restorePlan = null }) { Text("やめる") } },
+                        )
                     }
                     if (confirmClear) {
                         AlertDialog(
