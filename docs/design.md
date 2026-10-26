@@ -1,0 +1,272 @@
+# Bento Home — 実装設計 v0.1
+
+作成日: 2026-10-26（日本時間）  
+前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
+状態: 設計案。コードは未着手。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+
+## 1. 確定した判断（2026-10-26）
+
+| 項目 | 決定 | 理由・影響 |
+|---|---|---|
+| applicationId | `com.rou39.bentohome` | 作者名義 rou39 とリポジトリ名に合わせる |
+| ウィジェットの配置粒度 | 位置は半マス（小マス単位）、サイズは1マス刻み（小マス×subdivisions） | 中央寄せ・半マスずらしを許しつつ、提供元のサイズ制約と整合しやすい |
+| 長押しメニュー（ホームのアイコン） | ホームから削除／移動開始、アプリ情報／アンインストール、アプリショートカット（静的・動的）、外観の個別設定 | ショートカットは既定ホームのときだけ表示。ショートカットのホームへの固定は初版対象外 |
+| アプリ一覧の形式 | グリッド。上部に検索欄と並び順切替 | ホームと同じアイコン描画を共有し、グレー表示・バッジの見え方を揃える |
+| 設計文書の置き場 | 要求・計画は `plan.md`、実装設計は `docs/design.md`、技術検証の記録は `docs/spike-notes.md`（段階1で作成） | 1ファイルの肥大化を避ける |
+
+## 2. 技術スタックと開発環境
+
+### 固定する方針
+
+- Kotlin、Jetpack Compose（Material3）、単一 Gradle モジュール `app`。Gradle Kotlin DSL と version catalog（`gradle/libs.versions.toml`）。
+- 依存注入は手書き（`Application` が持つ `AppContainer`）。Hilt は入れない。個人用の単一モジュールで、生成コードとビルド時間を増やす利点が薄い。
+- 永続化は Room（KSP）と Preferences DataStore。バックアップ書き出しは kotlinx.serialization の JSON。
+- 非同期は coroutines / Flow。UI 状態は `ViewModel` の `StateFlow`。
+- テストは JUnit4 + kotlinx-coroutines-test。純粋ロジック（配置・順位・通知集計・バックアップ変換）は JVM テスト。Room のマイグレーションは instrumented テスト。
+- リリース APK に `INTERNET` を含めない。マージ後のマニフェスト（`app/build/intermediates/merged_manifest/release/`）を検査する Gradle タスクを用意し、ビルドのたびに確認する。
+
+### このPCの現状（2026-10-26 確認）
+
+| 項目 | 状態 | 対応 |
+|---|---|---|
+| JDK | 17.0.2（`C:\Java\jdk-17.0.2`、`JAVA_HOME` 設定済み） | 現行 AGP の最低要件は満たす。採用する AGP が JDK 21 を求める場合は追加導入 |
+| Android SDK | `C:\Android`（`ANDROID_SDK_ROOT` 設定済み）。`platforms;android-37.0`、`build-tools;37.0.0`、platform-tools 37.0.1 を取得済み | compileSdk / targetSdk 37 で確定 |
+| ビルド構成 | Gradle 9.8.2（wrapper）、AGP 9.4.1、Kotlin 2.4.21、Compose BOM 2026.09.00 | JDK 17 でデバッグ・リリースのビルドと単体テストが通ることを確認済み。版は `gradle/libs.versions.toml` で管理。Room / KSP は段階2で追加 |
+| Android Studio | 未検出 | なくても Gradle CLI と adb でビルド・インストールできる。Compose プレビューやレイアウト検査が必要になれば導入 |
+| 接続端末 | なし（`adb devices` 空） | Pixel 9a で USB デバッグを有効化して接続する |
+| Git | 段階1の雛形で初回コミット済み | — |
+
+## 3. アプリ構造
+
+### Activity 構成
+
+| Activity | 役割 | マニフェスト属性 |
+|---|---|---|
+| `HomeActivity` | HOME 入口。ワークスペース、アプリ一覧（オーバーレイ）、編集モードを1つの Compose ツリーで持つ | `MAIN` + `HOME` + `DEFAULT`。`launchMode="singleTask"`、`stateNotNeeded="true"`、`excludeFromRecents="true"`、`screenOrientation="portrait"`（初版は縦固定）、テーマで `windowShowWallpaper=true` |
+| `SettingsActivity` | 設定。ホームの長押しメニューと、他ランチャーからも開けるよう `LAUNCHER` カテゴリーを持つ | ラベルは「Bento Home 設定」 |
+| 外部 | ウィジェットの許可・設定画面、アプリ情報、ロール要求 | `ActivityResultLauncher` で呼び、結果を `WidgetHostController` に戻す |
+
+HOME キーで `HomeActivity` が前面になるとき、`singleTask` により上に積まれた Activity（設定・ウィジェット設定画面）は閉じられ、`onNewIntent` が届く。ここで編集モード・ドラッグ・アプリ一覧・取り消し待ちを解除し、設定された「ホームページ」へ戻す。
+
+### 既定ホームの扱い
+
+- 起動時に `RoleManager.isRoleHeld(ROLE_HOME)` を確認し、未保持ならホーム上部に案内を出す。タップで `createRequestRoleIntent(ROLE_HOME)`。
+- 元のホームへ戻す導線は設定画面に置く（`Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS` を開くだけ）。
+
+### 戻る操作
+
+- `enableOnBackInvokedCallback=true` で予測型バックに対応する。
+- ホームでの戻る: ドラッグ中はキャンセル、アプリ一覧が開いていれば閉じる、編集モードなら解除、それ以外は何もしない。
+
+### エッジ・ツー・エッジ
+
+- システムバーは透過。配置計算は `WindowInsets.systemBars` と `displayCutout` を除いた領域で行う。ジェスチャーナビゲーション領域と下部ドックの重なりを実機で確認する。
+
+## 4. 状態の所有と流れ
+
+```
+Room / DataStore --Flow--> Repository --> ViewModel(StateFlow<UiState>) --> Compose
+      ^                                        |
+      +---------- 書き込み（LayoutEngine の結果）<----+
+```
+
+- 配置の正本は Room。`WorkspaceViewModel` は Room の Flow を購読して `WorkspaceUiState`（ページ、項目、ドック、編集モード、ドラッグ状態、取り消し待ち）を組み立てる。
+- 配置の変更は `LayoutEngine`（純粋関数）で新しい配置を計算し、成功したときだけ Room に書く。衝突は拒否して元に戻す（自動で押し出さない）。
+- 取り消しは1段階、メモリ内。直前の操作で変化した項目の変更前スナップショットを保持し、次の操作で破棄。プロセス終了で消える。
+- ウィジェットの削除は即時に ID を解放せず、スナックバーの取り消し猶予（5秒）が過ぎてから `deleteAppWidgetId` する。猶予中の取り消しは項目を戻すだけで済む。
+
+## 5. LayoutEngine（純粋 Kotlin、テスト対象）
+
+### グリッド定義
+
+- `GridSpec(baseColumns, baseRows, subdivisions=2)`。小マス数は `cols = baseColumns×sub`、`rows = baseRows×sub`。
+- 小マスの画面寸法は `使用可能幅 / cols`、`使用可能高さ / rows`。使用可能領域はシステムバー・カットアウト・ドック・ページインジケーターを除く。
+- 配置座標はすべて小マス単位。ピクセル値は描画時にのみ計算する。
+
+### 占有範囲（footprint）
+
+| 種別 | spanX, spanY | 位置の自由度 |
+|---|---|---|
+| アイコン | sub × sub（初期 2×2） | 任意の小マス |
+| ウィジェット | sub の倍数（1マス刻み） | 任意の小マス |
+
+- アイコンの画像とラベルは footprint の内側に収める。ラベルは footprint 幅で省略表示し、はみ出しで隣と重ねない。アイコン画像サイズの設定値は footprint からラベル高を引いた範囲に丸める。
+- 衝突判定は footprint の矩形重なりのみ。これにより「ラベル・タップ領域を含めた衝突」は footprint 同士の判定で保証される。
+
+### 操作 API（案）
+
+```
+canPlace(ws, pageId, rect, ignoreItemId?) : Boolean
+place(ws, item) : Result<Workspace, Conflict>
+move(ws, itemId, pageId, cellX, cellY) : Result<Workspace, Conflict>
+resize(ws, itemId, spanX, spanY, bounds) : Result<Workspace, Conflict>
+remove(ws, itemId) : Workspace
+changeGrid(ws, newSpec) : GridChangePreview   // 収まらない項目一覧を返し、確定は別呼び出し
+firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・復元時の自動配置
+```
+
+`Workspace` は不変データ。`Result` 失敗時は呼び出し側が元の状態を表示し続けるだけでよい。
+
+### ウィジェットのサイズ算出
+
+- 提供元の `targetCellWidth/Height`（API 31+）は「1マス（base cell）」の数として解釈し、`×sub` で小マス数にする。未指定なら `minWidth/minHeight` を小マス寸法で割り上げ、sub の倍数に丸める。
+- 下限は `minResizeWidth/Height`、上限は `maxResizeWidth/Height`（API 31+、0 なら無制限）を小マス寸法で換算する。`resizeMode` が許す方向だけハンドルを出す。
+- 配置・リサイズ・グリッド変更・インセット変化のたびに `AppWidgetHostView.updateAppWidgetSize(null, listOf(SizeF(wDp, hDp)))` を呼ぶ。初版は縦固定なので1サイズでよい。
+
+## 6. ワークスペースの描画と操作
+
+- ページは `HorizontalPager`。各ページは自作 `Layout` で、小マス座標から絶対配置する。
+- 壁紙はウィンドウ背景で表示し、ページのスクロール量に応じて `WallpaperManager.setWallpaperOffsets` を呼ぶ（設定でオフ可能）。
+- ドックはページの外側に固定。ドロップ先として同じ衝突規則を使う（ドックは1行、スロット単位）。
+
+### ジェスチャーの優先順位
+
+| 入力 | 動作 |
+|---|---|
+| タップ（アイコン） | 起動 |
+| 長押し（アイコン・ウィジェット） | 触覚フィードバック、メニュー表示。指を動かしたらドラッグへ移行 |
+| 横スワイプ（空き領域・アイコン上） | ページ送り |
+| 上スワイプ（空き領域） | アプリ一覧 |
+| 長押し（空き領域） | ウィジェット追加・壁紙・設定のメニュー |
+| ウィジェット内のタッチ | 原則そのままウィジェットへ渡す |
+
+ウィジェット（`AppWidgetHostView`）上の操作は Compose と View の相互運用になる。`AndroidView` を包む `Box` の `pointerInput` で `PointerEventPass.Initial` を使い、消費せずに長押しだけ検出する。長押し成立時に `ACTION_CANCEL` を View へ送り、以後は Compose 側がドラッグを扱う。ウィジェット上での横スワイプがページ送りになるか、リスト型ウィジェットの内部スクロールと干渉しないかは、段階1で Duolingo / GitHub の実物を使って確認する。期待どおりにならなければ、Launcher3 と同様に View 側で `onInterceptTouchEvent` を持つ薄いラッパー `ViewGroup` に切り替える。
+
+### ドラッグ
+
+- ドラッグ中は元の位置を空けたまま、半透明のゴーストを指に追従させる。ドロップ候補の小マスを強調し、衝突する場合は赤系で示してドロップを拒否する。
+- 画面端で一定時間止まるとページ送り。ページ末尾では新規ページを作る。空ページは編集モード終了時に末尾側から削除する。
+- ドロップ確定で `LayoutEngine.move` → Room 書き込み → 取り消しスナップショット更新。
+
+## 7. WidgetHostController
+
+- `AppWidgetHost(context, HOST_ID)` はアプリスコープで1つ。`HomeActivity.onStart` で `startListening()`、`onStop` で `stopListening()`。
+- 追加の流れ:
+  1. 自作のピッカーで `AppWidgetManager.getInstalledProvidersForProfile(user)` を提供元ごとに一覧表示（プレビュー画像、ラベル、推奨サイズ）。
+  2. `allocateAppWidgetId()` で仮 ID。
+  3. `bindAppWidgetIdIfAllowed(id, provider, options)` が false なら `ACTION_APPWIDGET_BIND` を結果付きで開く。
+  4. `info.configure != null` なら `startAppWidgetConfigureActivityForResult`。
+  5. 置き場所を決める（ドラッグで置く。置けなければ `firstFreeCell`、全ページで無ければ新規ページ）。Room に保存して確定。
+  6. いずれかで失敗・取消なら `deleteAppWidgetId(id)`。
+- View は ID ごとに `host.createView(...)` を1回だけ作り、`WidgetHostController` 内の `Map<Int, AppWidgetHostView>` に保持する。Compose 側は `key(widgetId) { AndroidView(factory = { controller.viewFor(id) }) }` とし、再コンポーズで作り直さない。項目削除の確定時と `HomeActivity.onDestroy` で解放する。
+- `onProvidersChanged` で提供元情報を更新し、`onAppWidgetRemoved(id)` で該当項目を Room から外す。
+- 起動時に `host.appWidgetIds` と Room の `widgetId` を突き合わせる。ホスト側に無い ID は「再追加が必要」のプレースホルダーとして同じ footprint に表示し、タップで追加の流れをやり直す。黙って消さない。
+
+## 8. AppCatalog
+
+- `LauncherApps.getActivityList(null, user)` で起動対象を取得し、`AppKey(componentName, profileSerial)` をキーにする。初版はメインプロファイルのみ扱うが、キーには最初から serial を含める。
+- `LauncherApps.Callback` でインストール・更新・削除・利用可否変化を受け、カタログの Flow を更新し、`IconRepository` の該当キャッシュを無効化する。
+- アプリが削除されたらホーム・ドックから該当項目を外す。利用不可（一時的）では残す。
+- 起動は `startMainActivity(component, user, sourceBounds, options)`。例外なく呼べたときだけ `UsageRepository.recordLaunch` を呼ぶ。
+- ショートカット: `hasShortcutHostPermission()` が true のときだけ `getShortcuts` で静的・動的を取得し、長押しメニューの上部に最大4件表示。`startShortcut` で起動。ショートカットの起動も使用頻度に加算する。
+
+## 9. 通知バッジ
+
+- `BadgeListenerService : NotificationListenerService`。マニフェストで `BIND_NOTIFICATION_LISTENER_SERVICE` 権限とインテントフィルターを宣言。
+- 有効状態は `NotificationManager.isNotificationListenerAccessGranted` で判定。設定画面から `ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS` を開く。
+- 集計は純粋関数 `BadgeAggregator` に分離し、`StatusBarNotification` を `NotificationFact(key, packageName, userSerial, groupKey, isGroupSummary, flags, canShowBadge)` に写してから渡す。本文・タイトル・送信者は写さない。
+- 規則:
+  - `key` で重複排除。同じキーの更新は置換。
+  - 同じ `groupKey` に子通知があればまとめ通知（`isGroupSummary`）は数えない。子が無いまとめ通知は1件として数える。
+  - `FLAG_ONGOING_EVENT`、`FLAG_FOREGROUND_SERVICE` を持つ通知は初版では除外。`Ranking.canShowBadge()` が false のものも除外。
+  - 結果は `Map<BadgeKey(packageName, userSerial), Int>`。
+- `onListenerConnected` で `activeNotifications` と `currentRanking` から全再構築。`onListenerDisconnected` と権限撤回時は「不明」（null）にして古い数を残さない。
+- `BadgeRepository` はアプリスコープの `StateFlow<BadgeState>`（`Disabled` / `Unknown` / `Counts(map)`）。ホームと一覧は `AppKey.componentName.packageName` と `profileSerial` で引く。
+- 表示は「なし／点／数値」。数値は 99 を超えたら `99+`。アプリ単位の `badgeMode` が既定値を上書きする。
+
+## 10. 使用頻度とグレー表示
+
+- Room: `usage_daily(appKey, date, count)`、`usage_summary(appKey, observedSince, lastLaunchAt)`。
+- `recordLaunch`: 同じアプリの起動が5秒以内に続いたら1回とみなす。日付は端末のローカル日。
+- 保持は60日。アプリ起動時（`HomeActivity.onCreate`）に古い行を削除する。
+- `RankingPolicy.score(dailyCounts, today) = Σ count_d × 0.5^(age_d / 7)`（過去28日）。同点は `lastLaunchAt` 降順、次に名前。
+- `GrayPolicy.isGray(summary, now, settings, hasBadge, keepColor)`:
+  - `keepColor` または `hasBadge` なら false。
+  - `lastLaunchAt != null` なら `now - lastLaunchAt >= grayDays`。
+  - `lastLaunchAt == null` なら `now - observedSince >= grayDays`。
+  - `observedSince` が無い（記録方式切替直後など）なら false。
+- `observedSince` はカタログがそのアプリを初めて観測した日時。アプリ更新では変えない。
+- グレー表示は描画時に `ColorMatrix` で彩度を落とす。キャッシュ画像は加工しない。
+
+## 11. IconRepository
+
+- `LruCache<IconKey, Bitmap>`、上限は `ActivityManager.memoryClass` の 1/8 程度（バイト単位）。`IconKey = AppKey + sizePx + shape`。
+- Adaptive icon は前景・背景を合成し、設定の形状パスでクリップ。旧式アイコンは中立色の背景に余白付きで載せる。
+- パッケージ変更、形状・サイズ設定の変更でキーが変わるか無効化される。
+- 読み込みは `Dispatchers.IO`、未ロード中はプレースホルダー。アプリ一覧の高速スクロールで詰まらないよう、画面に出る分だけ要求する。
+
+## 12. 永続化とバックアップ
+
+### Room（schema v1）
+
+plan.md の保存モデルをそのまま entity にする。`exportSchema = true` でスキーマ JSON をリポジトリに入れ、マイグレーションテストの基準にする。
+
+- `workspace_page`、`workspace_item`、`dock_item`、`app_appearance`、`usage_daily`、`usage_summary`。
+- `workspace_item.type` は `ICON` / `WIDGET`。`WIDGET` は `widgetId`、`widgetProvider`（ComponentName 文字列）、`profileSerial` を持つ。
+
+### DataStore
+
+- 外観・機能設定を Preferences DataStore に置き、型付きの `Settings` データクラスに変換して公開。`schemaVersion` を持つ。
+
+### バックアップ
+
+- 書き出し形式は JSON: `{ schemaVersion, exportedAt, pages, items, dock, appearance, settings }`。`items` のウィジェットは `widgetId` を含めず、`widgetProvider` と footprint だけを書く。使用履歴は既定で含めない（オプション）。
+- `ACTION_CREATE_DOCUMENT` / `ACTION_OPEN_DOCUMENT` で保存先を選ぶ。
+- 読み込み時はプレビュー（ページ数・項目数・再追加が必要なウィジェット数）を見せてから置き換える。ウィジェットは「再追加が必要」のプレースホルダーとして復元する。
+- マニフェストは `allowBackup="false"`。OS のクラウドバックアップ・端末間転送の対象外にする。
+
+## 13. アプリ一覧
+
+- `HomeActivity` 内の全画面オーバーレイ。上スワイプまたはボタンで開く。
+- 上部: 検索欄（自動でフォーカスしない）、並び順の切替（名前／頻度／最近）。
+- 本体: ホームと同じアイコン描画のグリッド。グレー表示・バッジを適用。
+- 一覧を開いた時点で並び順を確定し、開いている間は再ソートしない。インストール・削除は反映するが位置は末尾追加・該当削除のみ。
+- 長押しで「ホームへ追加（ドラッグ）」「アプリ情報」「アンインストール」「外観の個別設定」。
+
+## 14. パッケージ構成（`com.rou39.bentohome`）
+
+```
+app/           BentoApplication, AppContainer
+home/          HomeActivity, WorkspaceScreen, DrawerOverlay, EditMode, Drag
+layout/        GridSpec, Workspace, LayoutEngine, Conflict        <- 純粋 Kotlin
+catalog/       AppKey, AppCatalog, LauncherAppsSource
+widget/        WidgetHostController, WidgetPicker, WidgetSurface
+badge/         BadgeListenerService, BadgeAggregator, BadgeRepository
+usage/         UsageRepository, RankingPolicy, GrayPolicy        <- Policy は純粋 Kotlin
+icon/          IconRepository, IconShaper
+data/          Room database, DAO, DataStore, Settings
+settings/      SettingsActivity と各画面
+backup/        BackupModel, Exporter, Importer
+```
+
+## 15. テスト方針
+
+| 対象 | 種別 | 主な観点 |
+|---|---|---|
+| `LayoutEngine` | JVM | 半マス配置の衝突、中央寄せ、ウィジェットの span 丸め、グリッド変更プレビュー、`firstFreeCell` |
+| `BadgeAggregator` | JVM | 重複排除、グループ集計、常駐の除外、ランキングの尊重、全再構築 |
+| `RankingPolicy` / `GrayPolicy` | JVM | 減衰計算、同点処理、履歴不足・観測開始直後の非該当 |
+| `BackupModel` | JVM | 往復変換、未知フィールドの無視、`widgetId` を含めないこと |
+| Room | instrumented | スキーマ v1 の生成、以降のマイグレーション |
+| 実機 | 手動 | plan.md §9 の表に従い `docs/spike-notes.md` へ記録 |
+
+## 16. 段階1（技術検証）で作るもの
+
+同じ `app` モジュールに作り、段階2以降はそのまま育てる。
+
+1. 雛形: Gradle 設定、`HomeActivity`（HOME インテント、壁紙表示、ロール要求案内）、`SettingsActivity`（空）。
+2. アプリ起動: `AppCatalog` の最小版で全アプリを縦に並べ、タップで起動、起動回数をログ。
+3. ウィジェット: ピッカー → 許可 → 設定 → 画面下部へ1つ固定表示。Duolingo / GitHub で追加・タップ・更新・削除・再起動を確認。ウィジェット上の横スワイプと長押し検出の挙動を記録。
+4. 通知バッジ: `BadgeListenerService` と `BadgeAggregator`。パッケージ名と件数だけをログに出し、X / Discord / Gmail で追加・更新・削除・グループ化を確認。
+5. SDK: platform 37 の取得可否、AGP / Kotlin / Compose BOM の組み合わせを固定し `libs.versions.toml` に記録。
+
+完了条件は plan.md §7 段階1 のとおり。結果と制限は `docs/spike-notes.md` に書き、この文書の「実機で確認」項目を更新する。
+
+## 17. 未確定・リスク
+
+- ウィジェット上のジェスチャー調停（§6）。Compose の `AndroidView` で足りない場合は View ラッパーへ切り替える。
+- SDK 37 の提供状況。未提供なら 36 で開始する。
+- Android 17 のメモリ制限とウィジェット更新時の画像制限。ホスト側の対策は View 参照の解放と `IconRepository` の上限。提供元起因の不具合は記録して対応範囲外とする。
+- ウィジェット内タップからの起動（IntentSender 制限）。標準の `AppWidgetHostView` 経路を使い、追加のハンドリングを入れない。
+- GitHub ウィジェットの提供元が公式アプリか別アプリか。端末の一覧から確定し、plan.md に記録。
+- 縦固定の妥当性。横向き利用を求めるなら、グリッドを向きごとに持つ設計変更が必要になる。

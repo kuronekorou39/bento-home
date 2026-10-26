@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ホーム: 壁紙を透過表示する -->
+    <style name="Theme.Bento.Home" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">false</item>
+    </style>
+    <style name="Theme.Bento.Settings" parent="android:Theme.DeviceDefault.DayNight" />
+</resources>

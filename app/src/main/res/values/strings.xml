@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bento Home</string>
+    <string name="settings_label">Bento Home 設定</string>
+    <string name="badge_service_label">Bento Home 通知バッジ</string>
+</resources>
