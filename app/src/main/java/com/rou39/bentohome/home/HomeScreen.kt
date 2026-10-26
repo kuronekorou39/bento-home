@@ -74,6 +74,7 @@ import com.rou39.bentohome.widget.WidgetHostController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 
@@ -212,18 +213,36 @@ private fun WidgetCard(id: Int, onHost: Boolean, widgetHost: WidgetHostControlle
             .pointerInput(id) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var horizontalDrag = false
                     val ended = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) break
-                            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+                            val delta = change.position - down.position
+                            if (delta.getDistance() > viewConfiguration.touchSlop) {
+                                horizontalDrag = abs(delta.x) > abs(delta.y)
+                                break
+                            }
                         }
                     }
-                    if (ended == null) {
-                        Log.d(TAG, "widget long-press detected id=$id")
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menuOpen = true
+                    val takeOver = when {
+                        ended == null -> {
+                            Log.d(TAG, "widget long-press detected id=$id")
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menuOpen = true
+                            true
+                        }
+                        // 横方向のドラッグはページ送り用にホームが取る。
+                        // View はスワイプでも枠内ならタップとして扱うため、取らないと提供元が開く。
+                        horizontalDrag -> {
+                            Log.d(TAG, "horizontal drag over widget id=$id taken by home")
+                            true
+                        }
+                        // 縦方向はウィジェット内部のスクロールに任せる
+                        else -> false
+                    }
+                    if (takeOver) {
                         // 以降のイベントを消費して、ウィジェット側の操作を取り消させる
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
