@@ -20,6 +20,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.rou39.bentohome.badge.BadgeListenerService
 import com.rou39.bentohome.badge.BadgeRepository
+import com.rou39.bentohome.container
+import com.rou39.bentohome.monitor.MonitorActivity
 import com.rou39.bentohome.settings.SettingsActivity
 
 class HomeActivity : ComponentActivity() {
@@ -29,6 +31,9 @@ class HomeActivity : ComponentActivity() {
     private var showPicker by mutableStateOf(false)
     private var roleHeld by mutableStateOf(true)
     private var homeResetCount by mutableIntStateOf(0)
+
+    /** ホーム表示中はグラフを長い間隔で記録する（docs/monitor.md）。 */
+    private var monitorHandle: AutoCloseable? = null
 
     /** 許可・設定の途中にある仮のウィジェット ID。完了で配置し、取消で解放する。 */
     private var pendingWidgetId = NO_ID
@@ -50,6 +55,7 @@ class HomeActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         pendingWidgetId = savedInstanceState?.getInt(KEY_PENDING, NO_ID) ?: NO_ID
         pendingReplaceItemId = savedInstanceState?.getLong(KEY_REPLACE, NO_ITEM) ?: NO_ITEM
+        container.selfMetrics.observe(window)
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -61,6 +67,7 @@ class HomeActivity : ComponentActivity() {
                         onRequestRole = ::requestRole,
                         onOpenWidgetPicker = { showPicker = true },
                         onOpenSettings = { startActivity(Intent(this@HomeActivity, SettingsActivity::class.java)) },
+                        onOpenMonitor = { startActivity(Intent(this@HomeActivity, MonitorActivity::class.java)) },
                         onReconfigureWidget = { id -> widgetHost.startConfigure(this@HomeActivity, id, REQ_RECONFIGURE) },
                         onReAddWidget = ::reAddWidget,
                     )
@@ -77,6 +84,8 @@ class HomeActivity : ComponentActivity() {
         super.onStart()
         widgetHost.startListening()
         refreshRole()
+        container.selfMetrics.onHomeStart()
+        monitorHandle = container.monitor.attach(detailed = false)
     }
 
     override fun onResume() {
@@ -88,6 +97,9 @@ class HomeActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         widgetHost.stopListening()
+        container.selfMetrics.onHomeStop()
+        monitorHandle?.close()
+        monitorHandle = null
     }
 
     /** ホーム操作で戻ったときは一時的な状態を解除し、最初のページへ戻す（plan.md §2）。 */

@@ -55,6 +55,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Shizuku のシェル権限プロセスとの通信（システムモニター）
+        aidl = true
+        buildConfig = true
     }
 }
 
@@ -74,6 +77,8 @@ dependencies {
     ksp(libs.room.compiler)
     implementation(libs.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.shizuku.api)
+    implementation(libs.shizuku.provider)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.foundation)

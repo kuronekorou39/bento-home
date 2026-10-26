@@ -120,6 +120,7 @@ fun HomeScreen(
     onRequestRole: () -> Unit,
     onOpenWidgetPicker: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMonitor: () -> Unit,
     onReconfigureWidget: (Int) -> Unit,
     onReAddWidget: (itemId: Long, provider: String) -> Unit,
 ) {
@@ -325,12 +326,29 @@ fun HomeScreen(
                         },
                     )
                     DropdownMenuItem(text = { Text("すべてのアプリ") }, onClick = controller::openDrawer)
+                    DropdownMenuItem(text = { Text("システムモニター") }, onClick = {
+                        controller.backgroundMenuAt = null
+                        onOpenMonitor()
+                    })
                     DropdownMenuItem(text = { Text("設定") }, onClick = {
                         controller.backgroundMenuAt = null
                         onOpenSettings()
                     })
                 }
             }
+        }
+
+        controller.measuring?.let { MeasuringOverlay(it, controller.measureEndsAt) }
+        controller.measureResult?.let { result ->
+            MeasureResultDialog(
+                result = result,
+                canMove = !controller.locked,
+                onMove = {
+                    controller.measureResult = null
+                    vm.moveToLaterPage(result.itemId)
+                },
+                onDismiss = { controller.measureResult = null },
+            )
         }
 
         controller.appearanceTarget?.let { entry ->
@@ -725,7 +743,7 @@ private fun HomeWidgetCell(
                 Text("タップしてウィジェットを追加し直す", color = Color.White, fontSize = 12.sp)
             }
         } else {
-            WidgetHostSurface(controller, widget.widgetId, visible)
+            WidgetHostSurface(controller, widget.widgetId, visible && controller.hiddenWidgetId != widget.widgetId)
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val reconfigurable = info != null && info.configure != null &&
@@ -734,6 +752,12 @@ private fun HomeWidgetCell(
                 DropdownMenuItem(text = { Text("ウィジェットを設定") }, onClick = {
                     menuOpen = false
                     controller.onReconfigureWidget(widget.widgetId)
+                })
+            }
+            if (info != null) {
+                DropdownMenuItem(text = { Text("負荷を測る") }, onClick = {
+                    menuOpen = false
+                    controller.measureWidget(item.id, widget.widgetId, label.toString())
                 })
             }
             if (controller.locked) {

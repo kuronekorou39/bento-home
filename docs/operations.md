@@ -52,6 +52,32 @@ Bento Home が起動できない状態でも、PC から戻せる。
 adb shell cmd role add-role-holder android.app.role.HOME com.google.android.apps.nexuslauncher
 ```
 
+## システムモニターの権限
+
+詳細は `docs/monitor.md`。どれも任意で、無ければ表示できる情報が減るだけ。
+
+### adb で一度だけ付与する（再起動後も残る）
+
+```
+adb shell appops set com.rou39.bentohome GET_USAGE_STATS allow
+adb shell pm grant com.rou39.bentohome android.permission.DUMP
+```
+
+デバッグ版はパッケージ名を `com.rou39.bentohome.debug` にする。使用状況へのアクセスは OS の設定（特別なアプリアクセス → 使用状況へのアクセス）からも許可できる。
+
+### Shizuku（全プロセスの CPU・メモリ、端末の CPU 使用率）
+
+- Shizuku 13.6.0 を GitHub のリリースから入れた（署名者 `CN=Rikka`、証明書 SHA-256 `268b5590…db30`）。Play ストア版でもよい。
+- 端末の再起動のたびに起動し直す。端末だけで行うなら、Shizuku アプリの「ワイヤレスデバッグ」から起動する。PC がつながっていれば次のコマンドでも起動できる。
+
+```
+adb shell "$(adb shell pm path moe.shizuku.privileged.api | sed 's/package://;s/base.apk//')lib/arm64/libshizuku.so"
+```
+
+- 初回はモニター画面の「Shizuku を許可する」から許可する。許可した後は「Shizuku でまとめて許可する」で、上の2つの権限も付与できる。
+- Shizuku を後から起動したときに Bento が気づかない場合は、Bento を強制停止して開き直す。
+- 計測用のプロセスはモニター画面を表示している間だけ動く。
+
 ## バックアップと復元
 
 - 設定画面 → バックアップ → 「書き出す」で、配置・設定・外観の個別設定を JSON に保存する。保存先はシステムのファイル選択で選ぶ。
@@ -68,4 +94,4 @@ adb shell cmd role add-role-holder android.app.role.HOME com.google.android.apps
 
 ## 通信について
 
-Bento Home 自身は INTERNET 権限を持たず、通信しない。起動したアプリ、ウィジェットの提供元、OS のバックアップ、ユーザーが選んだクラウドの保存先は、それぞれ独自に通信することがある。
+Bento Home 自身は INTERNET 権限を持たず、通信しない。システムモニターの「Bento」タブで、権限の有無と端末の起動後に送受信したバイト数を確認できる。起動したアプリ、ウィジェットの提供元、OS のバックアップ、ユーザーが選んだクラウドの保存先は、それぞれ独自に通信することがある。

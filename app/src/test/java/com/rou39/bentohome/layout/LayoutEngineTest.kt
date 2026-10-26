@@ -194,4 +194,20 @@ class LayoutEngineTest {
         assertEquals(listOf(0), shrunk.dock.map { it.slot })
         assertEquals(other, (shrunk.items.single().content as ItemContent.App).app)
     }
+
+    @Test
+    fun moveToLaterPageUsesNextPageWithSpace() {
+        val w = ws(icon(1, 0, 0, pageId = 1), pages = 2)
+        val moved = LayoutEngine.moveToLaterPage(w, 1, grid).ok()
+        assertEquals(2L, moved.item(1)!!.pageId)
+    }
+
+    @Test
+    fun moveToLaterPageAddsPageWhenLastPage() {
+        val w = ws(icon(1, 0, 0, pageId = 1), icon(2, 4, 4, pageId = 1))
+        val moved = LayoutEngine.moveToLaterPage(w, 2, grid).ok()
+        assertEquals(2, moved.pages.size)
+        assertEquals(CellRect(0, 0, 2, 2), moved.item(2)!!.rect)
+        assertEquals(1L, moved.item(1)!!.pageId)
+    }
 }

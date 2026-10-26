@@ -9,6 +9,11 @@ import com.rou39.bentohome.data.BentoDatabase
 import com.rou39.bentohome.data.SettingsRepository
 import com.rou39.bentohome.data.WorkspaceRepository
 import com.rou39.bentohome.icon.IconCache
+import com.rou39.bentohome.monitor.AppStats
+import com.rou39.bentohome.monitor.MonitorRepository
+import com.rou39.bentohome.monitor.SelfMetrics
+import com.rou39.bentohome.monitor.ShizukuBridge
+import com.rou39.bentohome.monitor.WidgetMetrics
 import com.rou39.bentohome.usage.UsageRepository
 import com.rou39.bentohome.widget.SpikeWidgetStore
 import com.rou39.bentohome.widget.WidgetHostController
@@ -34,12 +39,17 @@ class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val iconCache = IconCache(context)
     val appCatalog = AppCatalog(context)
-    val widgetHost = WidgetHostController(context)
+    val widgetMetrics = WidgetMetrics()
+    val widgetHost = WidgetHostController(context, widgetMetrics)
     val database = BentoDatabase.create(context)
     val workspaceRepository = WorkspaceRepository(database.workspaceDao(), appScope)
     val settingsRepository = SettingsRepository(context)
     val appearanceRepository = AppearanceRepository(database.appearanceDao())
     val usageRepository = UsageRepository(database.usageDao(), appScope)
+    val selfMetrics = SelfMetrics()
+    val shizuku = ShizukuBridge(context)
+    val monitor = MonitorRepository(context, appScope, shizuku)
+    val appStats = AppStats(context)
 
     /** 設定画面からホームへ復元を渡す。ホームが購読していなければ設定画面が直接保存する。 */
     val restoreRequests = MutableSharedFlow<RestorePlan>()

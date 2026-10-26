@@ -60,6 +60,24 @@ object LayoutEngine {
         return null
     }
 
+    /**
+     * 項目を今のページより後ろのページへ移す。空きが無ければ末尾にページを足す。
+     * 重いウィジェットを最初のページから外すのに使う（docs/monitor.md）。
+     */
+    fun moveToLaterPage(ws: Workspace, itemId: Long, grid: GridSpec): Placement {
+        val item = ws.item(itemId) ?: return Placement.Blocked
+        val ordered = ws.orderedPages
+        val later = ordered.dropWhile { it.id != item.pageId }.drop(1)
+        for (page in later) {
+            firstFreeCell(ws, page.id, item.rect.width, item.rect.height, page.grid.subdivisions)?.let { rect ->
+                return move(ws, itemId, page.id, rect.x, rect.y)
+            }
+        }
+        val (withPage, page) = addPage(ws, grid)
+        if (!item.rect.movedTo(0, 0).fitsIn(page.grid)) return Placement.Blocked
+        return move(withPage, itemId, page.id, 0, 0)
+    }
+
     fun addPage(ws: Workspace, grid: GridSpec): Pair<Workspace, Page> {
         val order = (ws.pages.maxOfOrNull { it.order } ?: -1) + 1
         val page = Page(ws.nextPageId(), order, grid)

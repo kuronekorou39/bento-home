@@ -62,6 +62,7 @@ import com.rou39.bentohome.data.LabelSize
 import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.LayoutEngine
+import com.rou39.bentohome.monitor.MonitorActivity
 import kotlinx.coroutines.launch
 
 /** 設定画面。通知バッジ・ホーム画面・アイコンの外観・既定ホームの切り替え導線を持つ。 */
@@ -209,6 +210,27 @@ class SettingsActivity : ComponentActivity() {
                             onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("読み込む") }
+
+                        HorizontalDivider()
+                        Section("システムモニター")
+                        Text(
+                            "端末の CPU・メモリ・通信・温度のグラフ、アプリごとの負荷、ウィジェットの負荷、" +
+                                "Bento 自身の権限・保存データ・負荷を確認できます。ホームの背景の長押しからも開けます。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Button(
+                            onClick = { startActivity(Intent(this@SettingsActivity, MonitorActivity::class.java)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("システムモニターを開く") }
+                        OutlinedButton(
+                            onClick = {
+                                startActivity(
+                                    Intent(this@SettingsActivity, MonitorActivity::class.java)
+                                        .putExtra(MonitorActivity.EXTRA_TAB, MonitorActivity.TAB_BENTO),
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Bento の権限・データ・負荷を見る") }
 
                         HorizontalDivider()
                         Section("ホームアプリ")

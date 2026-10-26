@@ -9,18 +9,23 @@ import android.content.Context
 import android.content.Intent
 import android.os.Process
 import android.util.Log
+import android.widget.RemoteViews
+import com.rou39.bentohome.monitor.WidgetMetrics
 
 /**
  * AppWidgetHost をアプリスコープで1つ持つ。View は ID ごとに1回だけ作り、
  * Compose の再描画で作り直さない（docs/design.md §7）。
  */
-class WidgetHostController(private val context: Context) {
+class WidgetHostController(private val context: Context, private val metrics: WidgetMetrics) {
     val manager: AppWidgetManager = AppWidgetManager.getInstance(context)
 
     private val host = object : AppWidgetHost(context, HOST_ID) {
         override fun onProvidersChanged() {
             Log.d(TAG, "providers changed")
         }
+
+        override fun onCreateView(context: Context, appWidgetId: Int, appWidget: AppWidgetProviderInfo?): AppWidgetHostView =
+            MeteredHostView(context, metrics)
     }
 
     private val views = mutableMapOf<Int, AppWidgetHostView>()
@@ -63,6 +68,14 @@ class WidgetHostController(private val context: Context) {
         views.remove(id)
         host.deleteAppWidgetId(id)
         Log.d(TAG, "deleted widget id $id")
+    }
+
+    /** 提供元からの更新を数える（docs/monitor.md）。 */
+    private class MeteredHostView(context: Context, private val metrics: WidgetMetrics) : AppWidgetHostView(context) {
+        override fun updateAppWidget(remoteViews: RemoteViews?) {
+            super.updateAppWidget(remoteViews)
+            if (appWidgetId != 0) metrics.onUpdate(appWidgetId)
+        }
     }
 
     private companion object {

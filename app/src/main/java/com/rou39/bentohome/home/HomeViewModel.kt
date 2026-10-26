@@ -53,6 +53,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsRepo = c.settingsRepository
     private val appearanceRepo = c.appearanceRepository
     private val usageRepo = c.usageRepository
+    val selfMetrics = c.selfMetrics
+    val widgetMetrics = c.widgetMetrics
 
     val settings: StateFlow<LauncherSettings> =
         settingsRepo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, LauncherSettings())
@@ -236,6 +238,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val item = ws.item(itemId) ?: return
         val widgetId = (item.content as? ItemContent.Widget)?.widgetId
         commit(LayoutEngine.remove(ws, itemId), message = "ホームから削除しました", removedWidgetIds = setOfNotNull(widgetId))
+    }
+
+    /** 重いウィジェットを後ろのページへ移し、そのページを表示する。 */
+    fun moveToLaterPage(itemId: Long) {
+        val ws = _workspace.value ?: return
+        val result = LayoutEngine.moveToLaterPage(ws, itemId, gridOf(ws)) as? Placement.Ok ?: return
+        val moved = result.workspace.item(itemId) ?: return
+        commit(result.workspace, message = "後ろのページへ移しました")
+        val index = LayoutEngine.pruneTrailingEmptyPages(result.workspace).orderedPages.indexOfFirst { it.id == moved.pageId }
+        if (index >= 0) _focusPage.tryEmit(index)
     }
 
     fun removeDock(slot: Int) {

@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
-状態: 段階5まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`〜`docs/stage5-notes.md`（段階2〜5）。運用手順は `docs/operations.md`。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+状態: 段階5まで実装済み。その後にシステムモニターを追加（設計と実機確認は `docs/monitor.md`）。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`〜`docs/stage5-notes.md`（段階2〜5）。運用手順は `docs/operations.md`。「実機で確認」とある項目は段階1の技術検証で結論を出す。
 
 ## 1. 確定した判断（2026-10-26）
 
@@ -267,6 +267,9 @@ icon/          IconRepository, IconShaper
 data/          Room database, DAO, DataStore, Settings
 settings/      SettingsActivity と各画面
 backup/        BackupModel, Exporter, Importer
+monitor/       MonitorActivity, MonitorRepository, ShizukuBridge, AppStats, LoadMetrics
+               ProcSnapshot, Temperatures, AppRows                 <- 純粋 Kotlin
+monitor/priv/  PrivilegedService（Shizuku がシェル権限で起動する）
 ```
 
 ## 15. テスト方針
