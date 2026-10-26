@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 更新日: 2026-10-26 v0.3 — ウィジェット粒度・長押しメニュー・一覧形式・applicationId を確定。実装レベルの設計は `docs/design.md` に分離。  
-状態: 段階3（毎日使う版）まで実装し、実機で確認済み。結果は `docs/spike-notes.md`・`docs/stage2-notes.md`・`docs/stage3-notes.md`。端末の再起動後の確認と、Discord・Gmail のバッジ確認は未実施。
+状態: 段階4（使用頻度の反映）まで実装し、実機で確認済み。結果は `docs/spike-notes.md`・`docs/stage2-notes.md`・`docs/stage3-notes.md`・`docs/stage4-notes.md`。端末の再起動後の確認と、Discord・Gmail のバッジ確認は未実施。
 
 ## 1. 目的と要求
 

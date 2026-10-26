@@ -74,7 +74,7 @@ class HomeController(
         onDragStarted: () -> Unit,
         fromDrawer: Boolean = false,
     ) = ItemGestureCallbacks(
-        onTap = { bounds -> entry?.let { vm.catalog.launch(it, bounds) } },
+        onTap = { bounds -> entry?.let { vm.launch(it, bounds) } },
         onLongPress = onLongPress,
         canDrag = canDrag && !locked,
         onDragStart = { pointer, grab, size ->

@@ -5,7 +5,10 @@ import android.appwidget.AppWidgetProviderInfo
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.catalog.PackageEvent
+import com.rou39.bentohome.data.DrawerSort
+import com.rou39.bentohome.usage.AppUsage
 import com.rou39.bentohome.container
 import com.rou39.bentohome.data.AppAppearance
 import com.rou39.bentohome.data.LauncherSettings
@@ -49,12 +52,20 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = c.workspaceRepository
     private val settingsRepo = c.settingsRepository
     private val appearanceRepo = c.appearanceRepository
+    private val usageRepo = c.usageRepository
 
     val settings: StateFlow<LauncherSettings> =
         settingsRepo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, LauncherSettings())
 
     val appearances: StateFlow<Map<AppRef, AppAppearance>> =
         appearanceRepo.appearances.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val usage: StateFlow<Map<AppRef, AppUsage>> =
+        usageRepo.usage.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    /** グレー表示の判定に使う現在時刻。画面に戻るたびに更新する。 */
+    private val _now = MutableStateFlow(System.currentTimeMillis())
+    val now: StateFlow<Long> = _now.asStateFlow()
 
     private val _workspace = MutableStateFlow<Workspace?>(null)
     val workspace: StateFlow<Workspace?> = _workspace.asStateFlow()
@@ -99,6 +110,27 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         finalizePendingWidgetDeletes()
+    }
+
+    fun refreshClock() {
+        _now.value = System.currentTimeMillis()
+    }
+
+    fun today(): Long = usageRepo.today()
+
+    // ---- 起動 ----
+
+    /** 起動に成功したときだけ使用回数に数える（plan.md §4）。 */
+    fun launch(entry: AppEntry, bounds: android.graphics.Rect?) {
+        if (catalog.launch(entry, bounds)) usageRepo.recordLaunch(entry.ref)
+    }
+
+    fun launchShortcut(entry: AppEntry, shortcut: android.content.pm.ShortcutInfo) {
+        if (catalog.startShortcut(shortcut, null)) usageRepo.recordLaunch(entry.ref)
+    }
+
+    fun setDrawerSort(sort: DrawerSort) {
+        viewModelScope.launch { settingsRepo.update { it.copy(drawerSort = sort) } }
     }
 
     /** すべてのページは同じグリッドを使う。 */

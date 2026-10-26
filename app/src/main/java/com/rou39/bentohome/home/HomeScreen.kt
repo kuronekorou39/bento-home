@@ -91,6 +91,9 @@ import com.rou39.bentohome.layout.Page
 import com.rou39.bentohome.layout.ResizeLimits
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
+import com.rou39.bentohome.usage.GrayReason
+import com.rou39.bentohome.usage.RankInput
+import com.rou39.bentohome.usage.UsagePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -121,6 +124,8 @@ fun HomeScreen(
     val byRef by vm.catalog.byRef.collectAsState()
     val badgeState by BadgeRepository.state.collectAsState()
     val undo by vm.undo.collectAsState()
+    val usage by vm.usage.collectAsState()
+    val now by vm.now.collectAsState()
 
     val workspace = ws ?: return
     val pages = workspace.orderedPages
@@ -151,6 +156,17 @@ fun HomeScreen(
         }
     }
     val hostIds = remember(workspace) { vm.widgetHost.hostIds() }
+    // 使わなくなったアプリのグレー表示（plan.md §4）。バッジのあるアプリ・通常色に固定したアプリは対象外
+    val grayFor: (AppEntry?) -> GrayReason? = { entry ->
+        entry?.let {
+            val hasBadge = (counts?.get(BadgeKey(it.packageName, it.ref.profileSerial)) ?: 0) > 0
+            UsagePolicy.grayReason(
+                usage[it.ref], now, settings.grayDays, appearances[it.ref]?.keepColor == true, hasBadge,
+            )
+        }
+    }
+    val homeGrayFor: (AppEntry?) -> GrayReason? = if (settings.grayOnHome) grayFor else { _ -> null }
+    val drawerGrayFor: (AppEntry?) -> GrayReason? = if (settings.grayInDrawer) grayFor else { _ -> null }
 
     val wsState = rememberUpdatedState(workspace)
     val target by remember { derivedStateOf { controller.computeTarget(wsState.value) } }
@@ -215,6 +231,7 @@ fun HomeScreen(
                         byRef = byRef,
                         hostIds = hostIds,
                         badgeFor = badgeFor,
+                        grayFor = homeGrayFor,
                         highlight = highlight,
                         highlightValid = targetValid,
                     )
@@ -231,6 +248,7 @@ fun HomeScreen(
                     workspace = workspace,
                     byRef = byRef,
                     badgeFor = badgeFor,
+                    grayFor = homeGrayFor,
                     highlightSlot = (target as? DropTarget.Dock)?.slot,
                     highlightValid = targetValid,
                 )
@@ -242,6 +260,13 @@ fun HomeScreen(
                 controller = controller,
                 apps = apps,
                 badgeFor = badgeFor,
+                grayFor = drawerGrayFor,
+                sort = settings.drawerSort,
+                rankInputs = { list ->
+                    list.map { e ->
+                        RankInput(e.ref, e.label, usage[e.ref], appearances[e.ref]?.excludeFromRanking == true)
+                    }
+                },
                 // ドラッグ中は透明にするだけで残す。外すと指の操作が途切れる。
                 modifier = Modifier.alpha(if (drag.fromDrawer) 0f else 1f),
             )
@@ -370,6 +395,7 @@ private fun WorkspacePage(
     byRef: Map<AppRef, AppEntry>,
     hostIds: Set<Int>,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
+    grayFor: (AppEntry?) -> GrayReason?,
     highlight: CellRect?,
     highlightValid: Boolean,
 ) {
@@ -408,7 +434,7 @@ private fun WorkspacePage(
                     Box(Modifier.cellPlacement(item.rect, cellW, cellH).alpha(if (dragged) 0.3f else 1f)) {
                         when (val content = item.content) {
                             is ItemContent.App ->
-                                HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor)
+                                HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor, grayFor)
                             is ItemContent.Widget ->
                                 HomeWidgetCell(controller, item, content, content.widgetId in hostIds)
                         }
@@ -537,10 +563,12 @@ private fun HomeAppCell(
     entry: AppEntry?,
     iconSize: Dp,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
+    grayFor: (AppEntry?) -> GrayReason?,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
     val style = controller.style
+    val gray = grayFor(entry)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier.fillMaxSize().launcherItemGestures(
@@ -560,9 +588,10 @@ private fun HomeAppCell(
         AppIconView(
             entry, controller.vm.iconCache, iconSize, style.shape, badgeFor(entry),
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
+            gray = gray != null,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            AppMenuItems(controller, entry, close = { menuOpen = false })
+            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
                     menuOpen = false
@@ -575,9 +604,13 @@ private fun HomeAppCell(
 
 /** アプリショートカット・アプリ情報・アンインストール・外観の個別設定。ホーム・ドック・一覧で共通。 */
 @Composable
-fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit) {
+fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit, gray: GrayReason? = null) {
     val context = LocalContext.current
     if (entry == null) return
+    if (gray != null) {
+        DropdownMenuItem(text = { Text(gray.describe(), fontSize = 12.sp) }, onClick = {}, enabled = false)
+        HorizontalDivider()
+    }
     val catalog = controller.vm.catalog
     val density = context.resources.displayMetrics.densityDpi
     val shortcuts by produceState<List<Pair<android.content.pm.ShortcutInfo, ImageBitmap?>>>(emptyList(), entry) {
@@ -593,7 +626,7 @@ fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit
             leadingIcon = icon?.let { { Image(it, contentDescription = null, modifier = Modifier.size(24.dp)) } },
             onClick = {
                 close()
-                catalog.startShortcut(shortcut, null)
+                controller.vm.launchShortcut(entry, shortcut)
             },
         )
     }
@@ -733,6 +766,7 @@ private fun DockBar(
     workspace: Workspace,
     byRef: Map<AppRef, AppEntry>,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
+    grayFor: (AppEntry?) -> GrayReason?,
     highlightSlot: Int?,
     highlightValid: Boolean,
 ) {
@@ -762,7 +796,7 @@ private fun DockBar(
                         },
                     ),
             ) {
-                if (dockSlot != null) DockAppCell(controller, slot, dockSlot.app, byRef[dockSlot.app], badgeFor)
+                if (dockSlot != null) DockAppCell(controller, slot, dockSlot.app, byRef[dockSlot.app], badgeFor, grayFor)
             }
         }
     }
@@ -775,9 +809,11 @@ private fun DockAppCell(
     app: AppRef,
     entry: AppEntry?,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
+    grayFor: (AppEntry?) -> GrayReason?,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
+    val gray = grayFor(entry)
     val span = controller.vm.currentGrid().iconSpan
     val dragged = (controller.drag.source as? DragSource.Dock)?.slot == slot
     val style = controller.style
@@ -800,9 +836,10 @@ private fun DockAppCell(
         AppIconView(
             entry, controller.vm.iconCache, min(style.iconSize, DOCK_HEIGHT - 16.dp), style.shape, badgeFor(entry),
             labelSizeSp = null,
+            gray = gray != null,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            AppMenuItems(controller, entry, close = { menuOpen = false })
+            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ドックから外す") }, onClick = {
                     menuOpen = false

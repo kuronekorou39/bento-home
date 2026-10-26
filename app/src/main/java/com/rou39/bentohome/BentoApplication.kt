@@ -3,11 +3,13 @@ package com.rou39.bentohome
 import android.app.Application
 import android.content.Context
 import com.rou39.bentohome.catalog.AppCatalog
+import com.rou39.bentohome.catalog.PackageEvent
 import com.rou39.bentohome.data.AppearanceRepository
 import com.rou39.bentohome.data.BentoDatabase
 import com.rou39.bentohome.data.SettingsRepository
 import com.rou39.bentohome.data.WorkspaceRepository
 import com.rou39.bentohome.icon.IconCache
+import com.rou39.bentohome.usage.UsageRepository
 import com.rou39.bentohome.widget.SpikeWidgetStore
 import com.rou39.bentohome.widget.WidgetHostController
 import kotlinx.coroutines.CoroutineScope
@@ -35,14 +37,21 @@ class AppContainer(context: Context) {
     val workspaceRepository = WorkspaceRepository(database.workspaceDao(), appScope)
     val settingsRepository = SettingsRepository(context)
     val appearanceRepository = AppearanceRepository(database.appearanceDao())
+    val usageRepository = UsageRepository(database.usageDao(), appScope)
 
     /** 段階1の検証で追加したウィジェット ID。初回起動時に Room へ移して空にする。 */
     val spikeWidgetStore = SpikeWidgetStore(context)
 
     init {
         appScope.launch {
-            appCatalog.events.collect { iconCache.invalidatePackage(it.packageName) }
+            appCatalog.events.collect { event ->
+                iconCache.invalidatePackage(event.packageName)
+                if (event is PackageEvent.Removed) usageRepository.forgetPackage(event.packageName, event.profileSerial)
+            }
         }
+        // 新しく見つかったアプリの観測開始を記録する（plan.md §4）
+        appScope.launch { appCatalog.apps.collect { apps -> usageRepository.observe(apps.map { it.ref }) } }
+        usageRepository.prune()
     }
 }
 

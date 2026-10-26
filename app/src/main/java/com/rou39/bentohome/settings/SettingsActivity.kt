@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +63,7 @@ class SettingsActivity : ComponentActivity() {
     private var notificationAccess by mutableStateOf(false)
     private val settingsRepo by lazy { container.settingsRepository }
     private val workspaceRepo by lazy { container.workspaceRepository }
+    private val usageRepo by lazy { container.usageRepository }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -68,6 +71,7 @@ class SettingsActivity : ComponentActivity() {
         setContent {
             val settings by settingsRepo.settings.collectAsState(initial = null)
             val scope = rememberCoroutineScope()
+            var confirmClear by remember { mutableStateOf(false) }
             fun update(transform: (LauncherSettings) -> LauncherSettings) {
                 scope.launch { settingsRepo.update(transform) }
             }
@@ -125,6 +129,32 @@ class SettingsActivity : ComponentActivity() {
                         Chips(LabelSize.entries, s.labelSize, { it.label }) { v -> update { it.copy(labelSize = v) } }
 
                         HorizontalDivider()
+                        Section("使用頻度とグレー表示")
+                        Text(
+                            "このランチャーから起動した回数と最終日時だけを端末内に記録します。" +
+                                "通知・履歴画面・他のアプリのリンクから開いた分は含みません。日別の件数は60日分だけ残します。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        SwitchRow("ホームで、使っていないアプリを薄く表示", s.grayOnHome) { v ->
+                            update { it.copy(grayOnHome = v) }
+                        }
+                        SwitchRow("アプリ一覧で、使っていないアプリを薄く表示", s.grayInDrawer) { v ->
+                            update { it.copy(grayInDrawer = v) }
+                        }
+                        Text("薄く表示するまでの日数")
+                        Chips(LauncherSettings.GRAY_DAYS_OPTIONS, s.grayDays, { "${it}日" }) { v ->
+                            update { it.copy(grayDays = v) }
+                        }
+                        Text(
+                            "起動できなくなることはありません。通知バッジのあるアプリ、通常の色を維持にしたアプリ、" +
+                                "観測を始めてから日が浅いアプリは薄くしません。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("使用履歴を削除")
+                        }
+
+                        HorizontalDivider()
                         Section("ホームアプリ")
                         Button(
                             onClick = { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) },
@@ -132,6 +162,22 @@ class SettingsActivity : ComponentActivity() {
                         ) {
                             Text("既定のホームアプリを変更（元のホームへ戻す）")
                         }
+                    }
+                    if (confirmClear) {
+                        AlertDialog(
+                            onDismissRequest = { confirmClear = false },
+                            title = { Text("使用履歴を削除しますか") },
+                            text = {
+                                Text("起動回数と最終起動日時を消し、今日から記録をやり直します。並び順とグレー表示はしばらく判定しません。")
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    confirmClear = false
+                                    scope.launch { usageRepo.clearHistory() }
+                                }) { Text("削除") }
+                            },
+                            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("やめる") } },
+                        )
                     }
                 }
             }

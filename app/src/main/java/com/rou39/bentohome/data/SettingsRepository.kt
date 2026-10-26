@@ -31,6 +31,13 @@ enum class LabelSize(val label: String, val sp: Int) {
     LARGE("大", 14),
 }
 
+/** アプリ一覧の並び順（plan.md §2）。 */
+enum class DrawerSort(val label: String) {
+    NAME("名前順"),
+    FREQUENT("よく使う順"),
+    RECENT("最近開いた順"),
+}
+
 data class LauncherSettings(
     val layoutLocked: Boolean = false,
     val dockVisible: Boolean = true,
@@ -42,6 +49,10 @@ data class LauncherSettings(
     val labelVisible: Boolean = true,
     val labelSize: LabelSize = LabelSize.MEDIUM,
     val badgeMode: BadgeMode = BadgeMode.NUMBER,
+    val drawerSort: DrawerSort = DrawerSort.NAME,
+    val grayOnHome: Boolean = true,
+    val grayInDrawer: Boolean = true,
+    val grayDays: Int = 30,
 ) {
     companion object {
         const val SUBDIVISIONS = 2
@@ -49,6 +60,7 @@ data class LauncherSettings(
         val ROWS_RANGE = 4..8
         val DOCK_SLOTS_RANGE = 3..6
         val ICON_SIZE_RANGE = 40..72
+        val GRAY_DAYS_OPTIONS = listOf(7, 14, 30, 60)
     }
 }
 
@@ -66,6 +78,10 @@ class SettingsRepository(private val context: Context) {
         val labelVisible = booleanPreferencesKey("label_visible")
         val labelSize = stringPreferencesKey("label_size")
         val badgeMode = stringPreferencesKey("badge_mode")
+        val drawerSort = stringPreferencesKey("drawer_sort")
+        val grayOnHome = booleanPreferencesKey("gray_on_home")
+        val grayInDrawer = booleanPreferencesKey("gray_in_drawer")
+        val grayDays = intPreferencesKey("gray_days")
     }
 
     val settings: Flow<LauncherSettings> = context.settingsStore.data.map(::read)
@@ -83,6 +99,10 @@ class SettingsRepository(private val context: Context) {
             p[Keys.labelVisible] = s.labelVisible
             p[Keys.labelSize] = s.labelSize.name
             p[Keys.badgeMode] = s.badgeMode.name
+            p[Keys.drawerSort] = s.drawerSort.name
+            p[Keys.grayOnHome] = s.grayOnHome
+            p[Keys.grayInDrawer] = s.grayInDrawer
+            p[Keys.grayDays] = s.grayDays
         }
     }
 
@@ -101,6 +121,10 @@ class SettingsRepository(private val context: Context) {
             labelVisible = p[Keys.labelVisible] ?: d.labelVisible,
             labelSize = enumOr(p[Keys.labelSize], d.labelSize),
             badgeMode = enumOr(p[Keys.badgeMode], d.badgeMode),
+            drawerSort = enumOr(p[Keys.drawerSort], d.drawerSort),
+            grayOnHome = p[Keys.grayOnHome] ?: d.grayOnHome,
+            grayInDrawer = p[Keys.grayInDrawer] ?: d.grayInDrawer,
+            grayDays = p[Keys.grayDays] ?: d.grayDays,
         )
     }
 

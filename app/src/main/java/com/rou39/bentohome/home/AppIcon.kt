@@ -22,6 +22,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
@@ -37,6 +39,7 @@ import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.icon.IconCache
 import com.rou39.bentohome.icon.IconRenderer
+import com.rou39.bentohome.usage.GrayReason
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -84,6 +87,7 @@ fun AppIconView(
     badge: BadgeDisplay?,
     labelSizeSp: Int?,
     modifier: Modifier = Modifier,
+    gray: Boolean = false,
 ) {
     Column(
         modifier = modifier,
@@ -93,7 +97,14 @@ fun AppIconView(
         Box(Modifier.size(iconSize)) {
             val icon = rememberAppIcon(entry, iconSize, shape, cache)
             when {
-                icon != null -> Image(icon, contentDescription = entry?.label, modifier = Modifier.fillMaxSize())
+                // グレー表示は彩度を落とすだけ。ラベルの読みやすさとタップ領域は変えない（plan.md §4）
+                icon != null -> Image(
+                    icon,
+                    contentDescription = entry?.label,
+                    modifier = Modifier.fillMaxSize(),
+                    colorFilter = if (gray) GRAY_FILTER else null,
+                    alpha = if (gray) GRAY_ALPHA else 1f,
+                )
                 entry == null -> Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Color.DarkGray),
@@ -140,3 +151,11 @@ fun AppIconView(
 }
 
 private val BADGE_COLOR = Color(0xFFD93025)
+private val GRAY_FILTER = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+private const val GRAY_ALPHA = 0.7f
+
+/** 長押しメニューに出すグレー表示の理由。 */
+fun GrayReason.describe(): String = when (this) {
+    is GrayReason.NotLaunchedSince -> "このランチャーでは${days}日間起動なし"
+    is GrayReason.NeverLaunched -> "観測を始めて${days}日、このランチャーでは未起動"
+}

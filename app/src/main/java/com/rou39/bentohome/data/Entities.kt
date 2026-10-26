@@ -66,3 +66,22 @@ data class AppAppearanceEntity(
     /** null なら全体の設定に従う。BadgeMode の名前。 */
     val badgeMode: String?,
 )
+
+/** このランチャーからの日別起動回数（plan.md §4）。最大60日分。 */
+@Entity(tableName = "usage_daily", primaryKeys = ["component", "profileSerial", "epochDay"])
+data class UsageDailyEntity(
+    val component: String,
+    val profileSerial: Long,
+    /** 端末のローカル日付。 */
+    val epochDay: Long,
+    val count: Int,
+)
+
+/** 観測開始と最終起動（plan.md §4）。アンインストールで削除し、入れ直したら観測をやり直す。 */
+@Entity(tableName = "usage_summary", primaryKeys = ["component", "profileSerial"])
+data class UsageSummaryEntity(
+    val component: String,
+    val profileSerial: Long,
+    val observedSince: Long,
+    val lastLaunchAt: Long?,
+)

@@ -147,11 +147,11 @@ class AppCatalog(private val context: Context) {
     fun shortcutIcon(shortcut: ShortcutInfo, density: Int): Drawable? =
         runCatching { launcherApps.getShortcutIconDrawable(shortcut, density) }.getOrNull()
 
-    fun startShortcut(shortcut: ShortcutInfo, sourceBounds: Rect?) {
+    fun startShortcut(shortcut: ShortcutInfo, sourceBounds: Rect?): Boolean =
         runCatching { launcherApps.startShortcut(shortcut, sourceBounds, null) }
             .onSuccess { Log.d(TAG, "shortcut launched: ${shortcut.`package`}") }
             .onFailure { Log.w(TAG, "shortcut failed: ${shortcut.`package`}", it) }
-    }
+            .isSuccess
 
     fun uninstallIntent(entry: AppEntry): Intent =
         Intent(Intent.ACTION_DELETE, Uri.fromParts("package", entry.packageName, null))

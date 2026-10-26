@@ -77,6 +77,7 @@ class HomeActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         BadgeRepository.onAccessChecked(BadgeListenerService.isAccessGranted(this))
+        vm.refreshClock()
     }
 
     override fun onStop() {

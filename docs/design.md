@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
-状態: 段階3まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`（段階2）、`docs/stage3-notes.md`（段階3）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+状態: 段階4まで実装済み。実機確認は `docs/spike-notes.md`（段階1）、`docs/stage2-notes.md`（段階2）、`docs/stage3-notes.md`（段階3）、`docs/stage4-notes.md`（段階4）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
 
 ## 1. 確定した判断（2026-10-26）
 
@@ -180,17 +180,23 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 ## 10. 使用頻度とグレー表示
 
-- Room: `usage_daily(appKey, date, count)`、`usage_summary(appKey, observedSince, lastLaunchAt)`。
-- `recordLaunch`: 同じアプリの起動が5秒以内に続いたら1回とみなす。日付は端末のローカル日。
-- 保持は60日。アプリ起動時（`HomeActivity.onCreate`）に古い行を削除する。
-- `RankingPolicy.score(dailyCounts, today) = Σ count_d × 0.5^(age_d / 7)`（過去28日）。同点は `lastLaunchAt` 降順、次に名前。
-- `GrayPolicy.isGray(summary, now, settings, hasBadge, keepColor)`:
+- Room v3: `usage_daily(component, profileSerial, epochDay, count)`、`usage_summary(component, profileSerial, observedSince, lastLaunchAt)`。
+- `recordLaunch`: 起動に成功したときだけ呼ぶ。ホーム・ドック・一覧のタップと、アプリショートカットの起動を数える。同じアプリの起動が5秒以内に続いたら1回とみなす。日付は端末のローカル日。
+- 保持は60日。アプリのプロセス起動時に古い行を削除する。
+- カタログに現れたアプリは、`usage_summary` に観測開始だけを記録する（既にある行は変えない）。アンインストールされたアプリは記録を消し、入れ直したら観測をやり直す。
+- 設定の「使用履歴を削除」は、日別件数と最終起動を消し、全アプリの観測開始を今の時刻にする。直後に全アプリを「未使用」と判定しないため。
+- 純粋ロジックは `UsagePolicy` にまとめた（設計時の RankingPolicy・GrayPolicy）。
+- `score(dailyCounts, today) = Σ count_d × 0.5^(age_d / 7)`（過去28日）。同点は `lastLaunchAt` 降順、次に名前。「頻度集計から除外」したアプリは頻度0・最終起動なしとして扱う。
+- 最近開いた順は `lastLaunchAt` 降順。一度も開いていない・除外したアプリは後ろに名前順。
+- 一覧の並び順は設定（名前順・よく使う順・最近開いた順）に保存する。一覧を開いた時点か切り替えた時点の記録で順番を決め、開いている間は動かさない。
+- グレー表示の対象画面（ホーム・一覧）と日数（7・14・30・60日、初期値30日）は設定で選ぶ。長押しメニューに理由を出す。
+- `grayReason(usage, now, grayDays, keepColor, hasBadge)`:
   - `keepColor` または `hasBadge` なら false。
   - `lastLaunchAt != null` なら `now - lastLaunchAt >= grayDays`。
   - `lastLaunchAt == null` なら `now - observedSince >= grayDays`。
   - `observedSince` が無い（記録方式切替直後など）なら false。
 - `observedSince` はカタログがそのアプリを初めて観測した日時。アプリ更新では変えない。
-- グレー表示は描画時に `ColorMatrix` で彩度を落とす。キャッシュ画像は加工しない。
+- グレー表示は描画時に `ColorMatrix` で彩度を0にし、濃さを 70% にする。キャッシュ画像は加工しない。ラベルとタップ領域は変えない。
 
 ## 11. IconRepository
 

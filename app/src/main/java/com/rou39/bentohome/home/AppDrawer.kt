@@ -39,25 +39,48 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.FilterChip
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.DrawerSort
+import com.rou39.bentohome.usage.GrayReason
+import com.rou39.bentohome.usage.RankInput
+import com.rou39.bentohome.usage.UsagePolicy
 
 private val DRAWER_ICON_SIZE = 52.dp
 
 /**
  * アプリ一覧（docs/design.md §13）。検索は一覧の中だけで使い、自動でフォーカスしない。
- * 並び順は段階2では名前順のみ。頻度順・最近順は段階4で追加する。
+ * 並び順は一覧を開いた時点（または並び順を切り替えた時点）で固定し、開いている間に項目が動かないようにする。
+ * インストールされたアプリは末尾に足し、削除されたアプリは外すだけにする。
  */
 @Composable
 fun AppDrawer(
     controller: HomeController,
     apps: List<AppEntry>,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
+    grayFor: (AppEntry?) -> GrayReason?,
+    sort: DrawerSort,
+    rankInputs: (List<AppEntry>) -> List<RankInput>,
     modifier: Modifier = Modifier,
 ) {
     val query = controller.query
-    val filtered = remember(apps, query) {
+    // remember の計算は並び順を切り替えたときだけ走る。その時点の使用記録で順番を決める
+    val frozenOrder = remember(sort) {
+        when (sort) {
+            DrawerSort.NAME -> apps.map { it.ref }
+            DrawerSort.FREQUENT -> UsagePolicy.sortByFrequency(rankInputs(apps), controller.vm.today())
+            DrawerSort.RECENT -> UsagePolicy.sortByRecent(rankInputs(apps))
+        }
+    }
+    val ordered = remember(frozenOrder, apps) {
+        val byRef = apps.associateBy { it.ref }
+        val known = frozenOrder.toHashSet()
+        frozenOrder.mapNotNull(byRef::get) + apps.filter { it.ref !in known }
+    }
+    val filtered = remember(ordered, query) {
         val q = query.trim()
-        if (q.isEmpty()) apps else apps.filter { it.label.contains(q, ignoreCase = true) || it.packageName.contains(q, ignoreCase = true) }
+        if (q.isEmpty()) ordered else ordered.filter { it.label.contains(q, ignoreCase = true) || it.packageName.contains(q, ignoreCase = true) }
     }
     val closeThreshold = with(LocalDensity.current) { 96.dp.toPx() }
     // 一覧の先頭でさらに下へ引くと閉じる
@@ -118,25 +141,33 @@ fun AppDrawer(
             )
             TextButton(onClick = { controller.drawerOpen = false }) { Text("閉じる") }
         }
-        Text(
-            "名前順・${filtered.size} 件",
-            color = Color.LightGray,
-            fontSize = 12.sp,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        ) {
+            for (option in DrawerSort.entries) {
+                FilterChip(
+                    selected = option == sort,
+                    onClick = { controller.vm.setDrawerSort(option) },
+                    label = { Text(option.label, fontSize = 12.sp) },
+                )
+            }
+            Text("${filtered.size} 件", color = Color.LightGray, fontSize = 12.sp)
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
             modifier = Modifier.fillMaxSize().nestedScroll(pullToClose),
         ) {
             items(filtered, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
-                DrawerTile(controller, entry, badgeFor(entry))
+                DrawerTile(controller, entry, badgeFor(entry), grayFor(entry))
             }
         }
     }
 }
 
 @Composable
-private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: BadgeDisplay?) {
+private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: BadgeDisplay?, gray: GrayReason?) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
     val span = controller.vm.currentGrid().iconSpan
@@ -165,6 +196,7 @@ private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: Badge
             entry, controller.vm.iconCache, DRAWER_ICON_SIZE, style.shape, badge,
             labelSizeSp = style.labelSizeSp,
             modifier = Modifier.padding(horizontal = 4.dp),
+            gray = gray != null,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             if (!controller.locked) {
@@ -173,7 +205,7 @@ private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: Badge
                     controller.vm.addAppToHome(entry.ref)
                 })
             }
-            AppMenuItems(controller, entry, close = { menuOpen = false })
+            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
         }
     }
 }
