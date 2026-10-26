@@ -27,15 +27,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.badge.BadgeListenerService
+import com.rou39.bentohome.container
+import com.rou39.bentohome.data.LauncherSettings
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 
-/** 段階1の最小設定画面。通知へのアクセスと既定ホームの切り替え導線だけを持つ。 */
+/** 設定画面。通知バッジ・ホーム画面・既定ホームの切り替え導線を持つ。 */
 class SettingsActivity : ComponentActivity() {
     private var notificationAccess by mutableStateOf(false)
+    private val settingsRepo by lazy { container.settingsRepository }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
+            val settings by settingsRepo.settings.collectAsState(initial = LauncherSettings())
+            val scope = rememberCoroutineScope()
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {
                     Column(
@@ -53,6 +65,13 @@ class SettingsActivity : ComponentActivity() {
                         )
                         Button(onClick = ::openNotificationAccess, modifier = Modifier.fillMaxWidth()) {
                             Text("通知へのアクセス設定を開く")
+                        }
+                        Text("ホーム画面", style = MaterialTheme.typography.titleMedium)
+                        SwitchRow("配置をロック（移動・削除・追加をしない）", settings.layoutLocked) {
+                            scope.launch { settingsRepo.setLayoutLocked(it) }
+                        }
+                        SwitchRow("ドックを表示", settings.dockVisible) {
+                            scope.launch { settingsRepo.setDockVisible(it) }
                         }
                         Text("ホームアプリ", style = MaterialTheme.typography.titleMedium)
                         Button(
@@ -80,5 +99,13 @@ class SettingsActivity : ComponentActivity() {
             )
         runCatching { startActivity(detail) }
             .onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

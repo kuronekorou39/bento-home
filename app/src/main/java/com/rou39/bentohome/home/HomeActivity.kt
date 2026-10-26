@@ -6,32 +6,31 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.rou39.bentohome.badge.BadgeListenerService
 import com.rou39.bentohome.badge.BadgeRepository
-import com.rou39.bentohome.container
 import com.rou39.bentohome.settings.SettingsActivity
 
-/**
- * 段階1（技術検証）のホーム。HOME 入口・アプリ起動・ウィジェット・通知バッジを確認する。
- * 段階2でワークスペース（グリッド配置）に置き換える。
- */
 class HomeActivity : ComponentActivity() {
-    private val catalog by lazy { container.appCatalog }
-    private val widgetHost by lazy { container.widgetHost }
-    private val widgetStore by lazy { container.widgetStore }
+    private val vm: HomeViewModel by viewModels()
+    private val widgetHost get() = vm.widgetHost
 
-    private var widgetIds by mutableStateOf(emptyList<Int>())
     private var showPicker by mutableStateOf(false)
     private var roleHeld by mutableStateOf(true)
-    private var homeResetCount by mutableStateOf(0)
+    private var homeResetCount by mutableIntStateOf(0)
 
-    /** 許可・設定の途中にある仮のウィジェット ID。完了で確定し、取消で解放する。 */
+    /** 許可・設定の途中にある仮のウィジェット ID。完了で配置し、取消で解放する。 */
     private var pendingWidgetId = NO_ID
 
     private val bindLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -47,24 +46,24 @@ class HomeActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         pendingWidgetId = savedInstanceState?.getInt(KEY_PENDING, NO_ID) ?: NO_ID
-        loadWidgets()
 
         setContent {
-            HomeScreen(
-                catalog = catalog,
-                widgetHost = widgetHost,
-                widgetIds = widgetIds,
-                hostIds = widgetHost.hostIds(),
-                roleHeld = roleHeld,
-                showPicker = showPicker,
-                homeResetCount = homeResetCount,
-                onRequestRole = ::requestRole,
-                onOpenPicker = { showPicker = true },
-                onClosePicker = { showPicker = false },
-                onPickWidget = ::addWidget,
-                onRemoveWidget = ::removeWidget,
-                onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
-            )
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Box {
+                    HomeScreen(
+                        vm = vm,
+                        roleHeld = roleHeld,
+                        homeResetCount = homeResetCount,
+                        onRequestRole = ::requestRole,
+                        onOpenWidgetPicker = { showPicker = true },
+                        onOpenSettings = { startActivity(Intent(this@HomeActivity, SettingsActivity::class.java)) },
+                    )
+                    if (showPicker) {
+                        BackHandler { showPicker = false }
+                        WidgetPicker(widgetHost, onPick = ::addWidget, onClose = { showPicker = false })
+                    }
+                }
+            }
         }
     }
 
@@ -84,7 +83,7 @@ class HomeActivity : ComponentActivity() {
         widgetHost.stopListening()
     }
 
-    /** ホーム操作で戻ったときは一時的な状態を解除する（plan.md §2）。 */
+    /** ホーム操作で戻ったときは一時的な状態を解除し、最初のページへ戻す（plan.md §2）。 */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d(TAG, "home intent received")
@@ -115,13 +114,6 @@ class HomeActivity : ComponentActivity() {
         roleLauncher.launch(getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_HOME))
     }
 
-    /** 保存済み ID とホスト側の ID を突き合わせる。欠けた ID は消さずに「再追加が必要」と表示する。 */
-    private fun loadWidgets() {
-        widgetIds = widgetStore.load()
-        val missing = widgetIds - widgetHost.hostIds()
-        if (missing.isNotEmpty()) Log.w(TAG, "widget ids missing on host: $missing")
-    }
-
     private fun addWidget(info: AppWidgetProviderInfo) {
         showPicker = false
         val id = widgetHost.allocateId()
@@ -148,8 +140,12 @@ class HomeActivity : ComponentActivity() {
         val id = pendingWidgetId
         if (id == NO_ID) return
         pendingWidgetId = NO_ID
-        widgetIds = widgetIds + id
-        widgetStore.save(widgetIds)
+        val info = widgetHost.info(id)
+        if (info == null) {
+            widgetHost.delete(id)
+            return
+        }
+        vm.placeNewWidget(id, info)
         Log.d(TAG, "committed widget id=$id")
     }
 
@@ -159,12 +155,6 @@ class HomeActivity : ComponentActivity() {
         pendingWidgetId = NO_ID
         widgetHost.delete(id)
         Log.d(TAG, "cancelled widget id=$id")
-    }
-
-    private fun removeWidget(id: Int) {
-        widgetIds = widgetIds - id
-        widgetStore.save(widgetIds)
-        widgetHost.delete(id)
     }
 
     private companion object {

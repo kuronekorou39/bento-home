@@ -2,7 +2,7 @@
 
 作成日: 2026-10-26（日本時間）  
 前提: `plan.md` v0.3 の要求・方針を実装へ落とす文書。plan.md と矛盾する記述があれば plan.md を優先し、この文書を直す。  
-状態: 設計案。段階1の検証用コードあり（`docs/spike-notes.md`）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
+状態: 段階2まで実装済み。実機確認は `docs/spike-notes.md`（段階1）と `docs/stage2-notes.md`（段階2）。「実機で確認」とある項目は段階1の技術検証で結論を出す。
 
 ## 1. 確定した判断（2026-10-26）
 
@@ -72,8 +72,9 @@ Room / DataStore --Flow--> Repository --> ViewModel(StateFlow<UiState>) --> Comp
 
 - 配置の正本は Room。`WorkspaceViewModel` は Room の Flow を購読して `WorkspaceUiState`（ページ、項目、ドック、編集モード、ドラッグ状態、取り消し待ち）を組み立てる。
 - 配置の変更は `LayoutEngine`（純粋関数）で新しい配置を計算し、成功したときだけ Room に書く。衝突は拒否して元に戻す（自動で押し出さない）。
-- 取り消しは1段階、メモリ内。直前の操作で変化した項目の変更前スナップショットを保持し、次の操作で破棄。プロセス終了で消える。
-- ウィジェットの削除は即時に ID を解放せず、スナックバーの取り消し猶予（5秒）が過ぎてから `deleteAppWidgetId` する。猶予中の取り消しは項目を戻すだけで済む。
+- 取り消しは1段階、メモリ内。直前の操作の前の配置全体を保持し、次の操作で破棄する。プロセス終了で消える。スナックバーが消えたあとも、背景の長押しメニューから取り消せる。
+- ウィジェットの削除では、ID をすぐには解放しない。次の操作で取り消せなくなった時点か、画面を閉じた時点で `deleteAppWidgetId` する。取り消し中にプロセスが終わった場合は、次の起動時にホスト側にあって配置に無い ID をまとめて解放する。
+- 保存は配置全体を1トランザクションで置き換える。書き込みはアプリスコープで行い、画面を閉じても途中で捨てない。
 
 ## 5. LayoutEngine（純粋 Kotlin、テスト対象）
 
@@ -130,7 +131,9 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 | 長押し（空き領域） | ウィジェット追加・壁紙・設定のメニュー |
 | ウィジェット内のタッチ | 原則そのままウィジェットへ渡す |
 
-ウィジェット（`AppWidgetHostView`）上の操作は Compose と View の相互運用になる。`AndroidView` を包む `Box` の `pointerInput` で `PointerEventPass.Initial` を使い、消費せずに動きを監視する。長押しが成立したとき、またはタッチスロップを超えて横方向が優勢になったときは、以降のイベントを消費する。消費すると相互運用層が View に `ACTION_CANCEL` を送る。縦方向はウィジェット内部のスクロールに渡す。段階1の実機検証で、横スワイプを取らないと View がタップと判定して提供元を開くことを確認し、この方式で解消した（`docs/spike-notes.md`）。View ラッパーへの切り替えは不要。縦スクロールするリスト型ウィジェットとの干渉は未検証。
+アイコンのタップ・長押し・ドラッグは1つの `awaitEachGesture` で扱う。長押しが成立したら指を離すまでのイベントを消費し、離したときにタップとして起動しない（`docs/stage2-notes.md`）。
+
+ウィジェット（`AppWidgetHostView`）上の操作は Compose と View の相互運用になる。`AndroidView` を包む `Box` の `pointerInput` で `PointerEventPass.Initial` を使い、消費せずに動きを監視する。長押しが成立したとき、またはタッチスロップを超えて横方向が優勢になったときは、以降のイベントを消費する。消費すると相互運用層が View に `ACTION_CANCEL` を送る。縦方向はウィジェット内部のスクロールに渡す。段階1の実機検証で、横スワイプを取らないと View がタップと判定して提供元を開くことを確認し、この方式で解消した（`docs/spike-notes.md`）。View ラッパーへの切り替えは不要。消費したイベントはページャーにも届かないので、ウィジェット上の横ドラッグはホームが `PagerState.dispatchRawDelta` で直接ページを動かす。移動量はウィジェット自身の移動に影響されないよう、ルート座標で測る。縦スクロールするリスト型ウィジェットとの干渉は未検証。
 
 ### ドラッグ
 
@@ -199,9 +202,10 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 ### Room（schema v1）
 
-plan.md の保存モデルをそのまま entity にする。`exportSchema = true` でスキーマ JSON をリポジトリに入れ、マイグレーションテストの基準にする。
+`exportSchema = true` でスキーマ JSON（`app/schemas/`）をリポジトリに入れ、マイグレーションテストの基準にする。
 
-- `workspace_page`、`workspace_item`、`dock_item`、`app_appearance`、`usage_daily`、`usage_summary`。
+- v1 は `workspace_page`、`workspace_item`、`dock_item` の3表。`app_appearance` は段階3、`usage_daily`・`usage_summary` は段階4でマイグレーションとして足す。
+- plan.md の `pinned` 列は使い道が無いので持たない。ページの表示順の列名は、SQL の予約語を避けて `position` とする。
 - `workspace_item.type` は `ICON` / `WIDGET`。`WIDGET` は `widgetId`、`widgetProvider`（ComponentName 文字列）、`profileSerial` を持つ。
 
 ### DataStore
@@ -220,6 +224,7 @@ plan.md の保存モデルをそのまま entity にする。`exportSchema = tru
 - `HomeActivity` 内の全画面オーバーレイ。上スワイプまたはボタンで開く。
 - 上部: 検索欄（自動でフォーカスしない）、並び順の切替（名前／頻度／最近）。
 - 本体: ホームと同じアイコン描画のグリッド。グレー表示・バッジを適用。
+- 一覧からアプリを起動しても一覧は閉じない。ホーム操作で戻ったときに閉じる。
 - 一覧を開いた時点で並び順を確定し、開いている間は再ソートしない。インストール・削除は反映するが位置は末尾追加・該当削除のみ。
 - 長押しで「ホームへ追加（ドラッグ）」「アプリ情報」「アンインストール」「外観の個別設定」。
 
