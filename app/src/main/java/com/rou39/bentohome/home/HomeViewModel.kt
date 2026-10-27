@@ -167,6 +167,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 is DragSource.Item -> LayoutEngine.moveItemToDock(ws, source.itemId, target.slot, dockSize)
                 is DragSource.Dock -> LayoutEngine.moveDockToDock(ws, source.slot, target.slot, dockSize)
                 is DragSource.NewApp -> LayoutEngine.addAppToDock(ws, source.app, target.slot, dockSize)
+                is DragSource.FolderApp -> LayoutEngine.addAppToDock(
+                    LayoutEngine.removeFromFolder(ws, source.folderItemId, source.app), source.app, target.slot, dockSize,
+                )
             }
             is DropTarget.Cell -> {
                 val (base, page) = pageForIndex(ws, target.pageIndex) ?: return null
@@ -174,18 +177,44 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                     is DragSource.Item -> LayoutEngine.move(base, source.itemId, page.id, target.x, target.y)
                     is DragSource.Dock ->
                         LayoutEngine.moveDockToPage(base, source.slot, page.id, target.x, target.y, base.nextItemId())
-                    is DragSource.NewApp -> {
-                        val span = page.grid.iconSpan
-                        val item = WorkspaceItem(
-                            base.nextItemId(), page.id, CellRect(target.x, target.y, span, span),
-                            ItemContent.App(source.app),
-                        )
-                        LayoutEngine.add(base, item)
-                    }
+                    is DragSource.NewApp -> addAppAt(base, page, target, source.app)
+                    is DragSource.FolderApp ->
+                        addAppAt(LayoutEngine.removeFromFolder(base, source.folderItemId, source.app), page, target, source.app)
                 }
+            }
+            is DropTarget.Merge -> {
+                val (base, page) = pageForIndex(ws, target.pageIndex) ?: return null
+                val targetItem = base.item(target.itemId)?.takeIf { it.pageId == page.id && LayoutEngine.acceptsMerge(it) }
+                    ?: return null
+                val (rest, app) = takeApp(base, source, target.itemId) ?: return null
+                LayoutEngine.mergeInto(rest, targetItem.id, app)
             }
         }
         return (result as? Placement.Ok)?.workspace
+    }
+
+    private fun addAppAt(ws: Workspace, page: Page, target: DropTarget.Cell, app: AppRef): Placement {
+        val span = page.grid.iconSpan
+        val item = WorkspaceItem(ws.nextItemId(), page.id, CellRect(target.x, target.y, span, span), ItemContent.App(app))
+        return LayoutEngine.add(ws, item)
+    }
+
+    /**
+     * 運んでいるアプリを元の場所から外す。フォルダーにまとめるときに使う。
+     * まとめ先そのもの・フォルダー・ウィジェットは運べないので null。
+     */
+    private fun takeApp(ws: Workspace, source: DragSource, targetItemId: Long): Pair<Workspace, AppRef>? = when (source) {
+        is DragSource.Item -> {
+            val app = (ws.item(source.itemId)?.content as? ItemContent.App)?.app
+            if (app == null || source.itemId == targetItemId) null else LayoutEngine.remove(ws, source.itemId) to app
+        }
+        is DragSource.Dock -> ws.dockAt(source.slot)?.let { LayoutEngine.removeDock(ws, source.slot) to it.app }
+        is DragSource.NewApp -> ws to source.app
+        is DragSource.FolderApp -> if (source.folderItemId == targetItemId) {
+            null
+        } else {
+            LayoutEngine.removeFromFolder(ws, source.folderItemId, source.app) to source.app
+        }
     }
 
     /** 既存ページ、またはページ数と同じ番号なら新しいページ。 */
@@ -248,6 +277,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         commit(result.workspace, message = "後ろのページへ移しました")
         val index = LayoutEngine.pruneTrailingEmptyPages(result.workspace).orderedPages.indexOfFirst { it.id == moved.pageId }
         if (index >= 0) _focusPage.tryEmit(index)
+    }
+
+    // ---- フォルダー（plan.md §10） ----
+
+    fun renameFolder(itemId: Long, title: String) {
+        val ws = _workspace.value ?: return
+        val next = LayoutEngine.renameFolder(ws, itemId, title)
+        if (next != ws) commit(next)
+    }
+
+    /** フォルダーから出して、ホームの空いている場所に置く。 */
+    fun takeOutOfFolder(folderItemId: Long, app: AppRef) {
+        val ws = _workspace.value ?: return
+        val removed = LayoutEngine.removeFromFolder(ws, folderItemId, app)
+        val span = gridOf(removed).iconSpan
+        val (next, itemId) = placeSomewhere(removed, span, span) { pageId, rect ->
+            WorkspaceItem(0, pageId, rect, ItemContent.App(app))
+        }
+        commit(next, message = "フォルダーから出しました", focusItemId = itemId)
     }
 
     fun removeDock(slot: Int) {
@@ -441,11 +489,14 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             else -> catalog.firstEntryOf(ref.packageName, ref.profileSerial)?.ref ?: ref
         }
         val items = ws.items.mapNotNull { item ->
-            val app = (item.content as? ItemContent.App)?.app ?: return@mapNotNull item
-            resolve(app)?.let { item.copy(content = ItemContent.App(it)) }
+            when (val c = item.content) {
+                is ItemContent.App -> resolve(c.app)?.let { item.copy(content = ItemContent.App(it)) }
+                is ItemContent.Folder -> item.copy(content = c.copy(apps = c.apps.mapNotNull(::resolve).distinct()))
+                is ItemContent.Widget -> item
+            }
         }
         val dock = ws.dock.mapNotNull { slot -> resolve(slot.app)?.let { DockSlot(slot.slot, it) } }
-        val cleaned = ws.copy(items = items, dock = dock)
+        val cleaned = LayoutEngine.normalizeFolders(ws.copy(items = items, dock = dock))
         if (cleaned != ws) Log.d(TAG, "cleaned up missing apps")
         return cleaned
     }
@@ -459,11 +510,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onPackageRemoved(e: PackageEvent.Removed) {
         val ws = _workspace.value ?: return
-        fun matches(ref: AppRef) = ref.packageName == e.packageName && ref.profileSerial == e.profileSerial
-        val next = ws.copy(
-            items = ws.items.filterNot { (it.content as? ItemContent.App)?.app?.let(::matches) == true },
-            dock = ws.dock.filterNot { matches(it.app) },
-        )
+        val next = LayoutEngine.removeApps(ws) { ref ->
+            ref.packageName == e.packageName && ref.profileSerial == e.profileSerial
+        }
         if (next == ws) return
         // アンインストールは取り消せないので、取り消し用の状態も捨てる
         finalizePendingWidgetDeletes()

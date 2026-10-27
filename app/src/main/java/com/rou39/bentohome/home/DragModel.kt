@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
 import com.rou39.bentohome.layout.AppRef
+import com.rou39.bentohome.layout.ItemContent
 
 /** ドラッグ中の項目がどこから来たか。 */
 sealed interface DragSource {
@@ -16,18 +17,25 @@ sealed interface DragSource {
 
     /** アプリ一覧からホームへ新しく置く。 */
     data class NewApp(val app: AppRef) : DragSource
+
+    /** 開いたフォルダーの中から運び出す。 */
+    data class FolderApp(val folderItemId: Long, val app: AppRef) : DragSource
 }
 
 sealed interface DropTarget {
     /** pageIndex がページ数と同じなら、末尾に新しいページを作って置く。 */
     data class Cell(val pageIndex: Int, val x: Int, val y: Int) : DropTarget
     data class Dock(val slot: Int) : DropTarget
+
+    /** ホームのアプリかフォルダーに重ねて、フォルダーにまとめる（plan.md §10）。 */
+    data class Merge(val pageIndex: Int, val itemId: Long) : DropTarget
     data object None : DropTarget
 }
 
 sealed interface DragVisual {
     data class App(val app: AppRef) : DragVisual
     data class Widget(val label: String) : DragVisual
+    data class Folder(val folder: ItemContent.Folder) : DragVisual
 }
 
 /** 画面全体（ルート座標）で共有するドラッグ状態。 */

@@ -98,7 +98,7 @@ class SettingsActivity : ComponentActivity() {
 
     private fun describe(plan: RestorePlan): String = buildString {
         append("ページ ${plan.workspace.pages.size}、")
-        append("ホームとドックのアプリ ${plan.workspace.items.count { it.content is ItemContent.App } + plan.workspace.dock.size}、")
+        append("ホームとドックのアプリ ${plan.workspace.appCount}、")
         append("ウィジェット ${plan.widgetsToReAdd}（追加し直しが必要）を復元します。")
         if (plan.skippedApps > 0) append("この端末に無いアプリ ${plan.skippedApps} 個は復元しません。")
         if (plan.usage != null) append("使用履歴も置き換えます。")

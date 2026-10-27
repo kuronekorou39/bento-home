@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -117,46 +118,56 @@ fun AppIconView(
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)).background(Color.DarkGray),
                 ) { Text("?", color = Color.White) }
             }
-            when (badge) {
-                null -> Unit
-                BadgeDisplay.Dot -> Box(
-                    Modifier
-                        .semantics { contentDescription = "通知あり" }
-                        .align(Alignment.TopEnd)
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(BADGE_COLOR),
-                )
-                is BadgeDisplay.Count -> Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .clearAndSetSemantics { contentDescription = "通知 ${badge.count} 件" }
-                        .align(Alignment.TopEnd)
-                        .offset(x = 4.dp, y = (-4).dp)
-                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                        .clip(CircleShape)
-                        .background(BADGE_COLOR)
-                        .padding(horizontal = 4.dp),
-                ) {
-                    Text(if (badge.count > 99) "99+" else badge.count.toString(), color = Color.White, fontSize = 10.sp)
-                }
-            }
+            IconBadge(badge)
         }
-        if (labelSizeSp != null) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                entry?.label ?: "見つからないアプリ",
-                style = TextStyle(
-                    color = Color.White,
-                    fontSize = labelSizeSp.sp,
-                    textAlign = TextAlign.Center,
-                    shadow = Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 6f),
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        if (labelSizeSp != null) IconLabel(entry?.label ?: "見つからないアプリ", labelSizeSp)
+    }
+}
+
+/** アイコンの右上のバッジ。アプリとフォルダーで共通。 */
+@Composable
+fun BoxScope.IconBadge(badge: BadgeDisplay?) {
+    when (badge) {
+        null -> Unit
+        BadgeDisplay.Dot -> Box(
+            Modifier
+                .semantics { contentDescription = "通知あり" }
+                .align(Alignment.TopEnd)
+                .size(12.dp)
+                .clip(CircleShape)
+                .background(BADGE_COLOR),
+        )
+        is BadgeDisplay.Count -> Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .clearAndSetSemantics { contentDescription = "通知 ${badge.count} 件" }
+                .align(Alignment.TopEnd)
+                .offset(x = 4.dp, y = (-4).dp)
+                .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                .clip(CircleShape)
+                .background(BADGE_COLOR)
+                .padding(horizontal = 4.dp),
+        ) {
+            Text(if (badge.count > 99) "99+" else badge.count.toString(), color = Color.White, fontSize = 10.sp)
         }
     }
+}
+
+/** アイコンの下のラベル。壁紙の上でも読めるよう影を付ける。 */
+@Composable
+fun IconLabel(text: String, labelSizeSp: Int) {
+    Spacer(Modifier.height(4.dp))
+    Text(
+        text,
+        style = TextStyle(
+            color = Color.White,
+            fontSize = labelSizeSp.sp,
+            textAlign = TextAlign.Center,
+            shadow = Shadow(Color.Black.copy(alpha = 0.7f), blurRadius = 6f),
+        ),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 private val BADGE_COLOR = Color(0xFFD93025)

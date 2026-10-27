@@ -130,6 +130,73 @@ object LayoutEngine {
 
     fun removeDock(ws: Workspace, slot: Int): Workspace = ws.copy(dock = ws.dock.filterNot { it.slot == slot })
 
+    // ---- フォルダー（plan.md §10） ----
+
+    /** 重ねて離したときにまとめられる相手か。アプリとフォルダーだけが受け取る。 */
+    fun acceptsMerge(item: WorkspaceItem): Boolean =
+        item.content is ItemContent.App || item.content is ItemContent.Folder
+
+    /**
+     * アプリを、ホームのアプリまたはフォルダーに重ねてまとめる。
+     * 相手がアプリなら同じ位置・同じ ID のフォルダーに変える。同じアプリが既に入っていれば足さない。
+     * 運んできた元（ホームの項目・ドック・フォルダー）は呼び出し側が先に外しておく。
+     */
+    fun mergeInto(ws: Workspace, targetItemId: Long, app: AppRef): Placement {
+        val target = ws.item(targetItemId) ?: return Placement.Blocked
+        val folder = when (val c = target.content) {
+            is ItemContent.App -> {
+                if (c.app == app) return Placement.Blocked
+                ItemContent.Folder(ItemContent.Folder.DEFAULT_TITLE, listOf(c.app, app))
+            }
+            is ItemContent.Folder -> if (app in c.apps) c else c.copy(apps = c.apps + app)
+            is ItemContent.Widget -> return Placement.Blocked
+        }
+        return Placement.Ok(replaceContent(ws, targetItemId, folder))
+    }
+
+    /** フォルダーからアプリを外す。残りが1つならアプリに戻し、空なら項目ごと消す。 */
+    fun removeFromFolder(ws: Workspace, folderItemId: Long, app: AppRef): Workspace {
+        val item = ws.item(folderItemId) ?: return ws
+        val folder = item.content as? ItemContent.Folder ?: return ws
+        return replaceContent(ws, folderItemId, folder.copy(apps = folder.apps - app))
+    }
+
+    fun renameFolder(ws: Workspace, folderItemId: Long, title: String): Workspace {
+        val folder = ws.item(folderItemId)?.content as? ItemContent.Folder ?: return ws
+        return replaceContent(ws, folderItemId, folder.copy(title = title.trim().ifEmpty { ItemContent.Folder.DEFAULT_TITLE }))
+    }
+
+    /** 条件に合うアプリを、ホーム・フォルダー・ドックのすべてから外す（アンインストール時）。 */
+    fun removeApps(ws: Workspace, matches: (AppRef) -> Boolean): Workspace {
+        var next = ws.copy(
+            items = ws.items.filterNot { (it.content as? ItemContent.App)?.app?.let(matches) == true },
+            dock = ws.dock.filterNot { matches(it.app) },
+        )
+        for (item in next.items) {
+            val folder = item.content as? ItemContent.Folder ?: continue
+            if (folder.apps.any(matches)) next = replaceContent(next, item.id, folder.copy(apps = folder.apps.filterNot(matches)))
+        }
+        return next
+    }
+
+    /** 中が1つ以下になったフォルダーを、アプリに戻すか消す。 */
+    fun normalizeFolders(ws: Workspace): Workspace {
+        if (ws.items.none { (it.content as? ItemContent.Folder)?.apps?.let { a -> a.size <= 1 } == true }) return ws
+        return ws.copy(
+            items = ws.items.mapNotNull { item ->
+                val folder = item.content as? ItemContent.Folder ?: return@mapNotNull item
+                when (folder.apps.size) {
+                    0 -> null
+                    1 -> item.copy(content = ItemContent.App(folder.apps.single()))
+                    else -> item
+                }
+            },
+        )
+    }
+
+    private fun replaceContent(ws: Workspace, itemId: Long, content: ItemContent): Workspace =
+        normalizeFolders(ws.copy(items = ws.items.map { if (it.id == itemId) it.copy(content = content) else it }))
+
     // ---- リサイズ・グリッド変更 ----
 
     /** ウィジェットの大きさを変える。範囲外・衝突は拒否する。 */

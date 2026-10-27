@@ -172,7 +172,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
             settingsBytes = sizeOf(File(app.filesDir, "datastore")),
             cacheBytes = sizeOf(app.cacheDir),
             pages = ws.pages.size,
-            apps = ws.items.count { it.content is ItemContent.App } + ws.dock.size,
+            apps = ws.appCount,
             widgets = ws.items.count { it.content is ItemContent.Widget },
             processCpuMs = Process.getElapsedCpuTime(),
             processUptimeMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime(),

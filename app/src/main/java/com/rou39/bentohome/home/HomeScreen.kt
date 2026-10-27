@@ -208,6 +208,7 @@ fun HomeScreen(
     BackHandler(enabled = controller.drawerOpen) { controller.drawerOpen = false }
     BackHandler(enabled = controller.backgroundMenuAt != null) { controller.backgroundMenuAt = null }
     BackHandler(enabled = controller.resizingItemId != null) { controller.resizingItemId = null }
+    BackHandler(enabled = controller.openFolderId != null) { controller.closeFolder() }
     BackHandler(enabled = drag.active) { drag.clear() }
 
     Box(Modifier.fillMaxSize()) {
@@ -250,8 +251,12 @@ fun HomeScreen(
                     val pageVisible by remember(index) {
                         derivedStateOf { pagerState.layoutInfo.visiblePagesInfo.any { it.index == index } }
                     }
-                    val highlight = (target as? DropTarget.Cell)?.takeIf { it.pageIndex == index }
-                        ?.let { CellRect(it.x, it.y, drag.spanX, drag.spanY) }
+                    val highlight = when (val t = target) {
+                        is DropTarget.Cell -> CellRect(t.x, t.y, drag.spanX, drag.spanY).takeIf { t.pageIndex == index }
+                        // まとめ先は、その項目の範囲を示す
+                        is DropTarget.Merge -> workspace.item(t.itemId)?.rect?.takeIf { t.pageIndex == index }
+                        else -> null
+                    }
                     WorkspacePage(
                         controller = controller,
                         workspace = workspace,
@@ -299,6 +304,15 @@ fun HomeScreen(
                 // ドラッグ中は透明にするだけで残す。外すと指の操作が途切れる。
                 modifier = Modifier.alpha(if (drag.fromDrawer) 0f else 1f),
             )
+        }
+
+        val openFolder = controller.openFolderId?.let { workspace.item(it) }
+        val openFolderContent = openFolder?.content as? ItemContent.Folder
+        if (openFolder != null && openFolderContent != null) {
+            FolderOverlay(controller, openFolder, openFolderContent, byRef, badgeFor, homeGrayFor)
+        } else if (controller.openFolderId != null && !drag.active) {
+            // 中が1つになってアプリに戻った、または削除されたフォルダーは閉じる
+            LaunchedEffect(Unit) { controller.closeFolder() }
         }
 
         DragGhost(controller, byRef)
@@ -485,6 +499,8 @@ private fun WorkspacePage(
                                 HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor, grayFor)
                             is ItemContent.Widget ->
                                 HomeWidgetCell(controller, item, content, content.widgetId in hostIds, widgetsVisible)
+                            is ItemContent.Folder ->
+                                HomeFolderCell(controller, item, content, byRef, iconSize, badgeFor)
                         }
                     }
                 }
@@ -937,6 +953,9 @@ private fun DragGhost(controller: HomeController, byRef: Map<AppRef, AppEntry>) 
         when (visual) {
             is DragVisual.App ->
                 AppIconView(byRef[visual.app], controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null)
+            is DragVisual.Folder -> FolderIconView(
+                visual.folder, byRef, controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null,
+            )
             is DragVisual.Widget -> Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color(0x99FFFFFF)),

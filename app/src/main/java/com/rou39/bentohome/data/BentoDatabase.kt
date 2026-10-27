@@ -14,14 +14,17 @@ import androidx.room.RoomDatabase
         AppAppearanceEntity::class,
         UsageDailyEntity::class,
         UsageSummaryEntity::class,
+        FolderAppEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         // v2: app_appearance を追加
         AutoMigration(from = 1, to = 2),
         // v3: usage_daily・usage_summary を追加
         AutoMigration(from = 2, to = 3),
+        // v4: フォルダー（workspace_item.title と folder_app）を追加
+        AutoMigration(from = 3, to = 4),
     ],
 )
 abstract class BentoDatabase : RoomDatabase() {

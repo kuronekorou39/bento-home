@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.data.IconShape
+import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.monitor.SelfCounters
 import com.rou39.bentohome.monitor.WidgetMeasurement
@@ -42,6 +43,12 @@ class HomeController(
     /** リサイズ中のウィジェット項目。null ならリサイズしていない。 */
     var resizingItemId by mutableStateOf<Long?>(null)
 
+    /** 開いているフォルダーの項目 ID。null なら閉じている。 */
+    var openFolderId by mutableStateOf<Long?>(null)
+
+    /** 開いたフォルダーで名前を編集中か。 */
+    var renamingFolder by mutableStateOf(false)
+
     /** 外観の個別設定ダイアログの対象。 */
     var appearanceTarget by mutableStateOf<AppEntry?>(null)
 
@@ -74,6 +81,7 @@ class HomeController(
         backgroundMenuAt = null
         resizingItemId = null
         appearanceTarget = null
+        closeFolder()
         drag.clear()
         measureJob?.cancel()
         measureResult = null
@@ -125,6 +133,17 @@ class HomeController(
         drawerOpen = true
     }
 
+    fun openFolder(itemId: Long, rename: Boolean = false) {
+        backgroundMenuAt = null
+        openFolderId = itemId
+        renamingFolder = rename
+    }
+
+    fun closeFolder() {
+        openFolderId = null
+        renamingFolder = false
+    }
+
     fun itemCallbacks(
         source: DragSource,
         visual: DragVisual,
@@ -135,8 +154,9 @@ class HomeController(
         onLongPress: () -> Unit,
         onDragStarted: () -> Unit,
         fromDrawer: Boolean = false,
+        onTap: ((android.graphics.Rect?) -> Unit)? = null,
     ) = ItemGestureCallbacks(
-        onTap = { bounds -> entry?.let { vm.launch(it, bounds) } },
+        onTap = onTap ?: { bounds -> if (entry != null) vm.launch(entry, bounds) },
         onLongPress = onLongPress,
         canDrag = canDrag && !locked,
         onDragStart = { pointer, grab, size ->
@@ -152,6 +172,7 @@ class HomeController(
         val source = drag.source ?: return
         vm.drop(source, computeTarget(vm.workspace.value))
         if (drag.fromDrawer) drawerOpen = false
+        if (source is DragSource.FolderApp) closeFolder()
         drag.clear()
     }
 
@@ -171,11 +192,33 @@ class HomeController(
         val grid = ws.pageAt(pageIndex)?.grid ?: vm.currentGrid()
         val cellW = area.width / grid.columns
         val cellH = area.height / grid.rows
+        mergeTarget(ws, pageIndex, (p.x - area.left) / cellW, (p.y - area.top) / cellH)?.let { return it }
         val anchorX = p.x - area.left - drag.grabFraction.x * cellW * drag.spanX
         val anchorY = p.y - area.top - drag.grabFraction.y * cellH * drag.spanY
         val x = (anchorX / cellW).roundToInt().coerceIn(0, (grid.columns - drag.spanX).coerceAtLeast(0))
         val y = (anchorY / cellH).roundToInt().coerceIn(0, (grid.rows - drag.spanY).coerceAtLeast(0))
         return DropTarget.Cell(pageIndex, x, y)
+    }
+
+    /**
+     * 指がアプリかフォルダーの中ほどにあれば、そこへまとめる。端の近くなら普通の移動として扱い、
+     * 隣に並べて置く操作と区別する。運べるのはアプリだけ（フォルダーやウィジェットはまとめない）。
+     * @param cx 指の位置（小マス単位）
+     */
+    private fun mergeTarget(ws: Workspace, pageIndex: Int, cx: Float, cy: Float): DropTarget.Merge? {
+        if (drag.visual !is DragVisual.App) return null
+        val page = ws.pageAt(pageIndex) ?: return null
+        val draggedId = (drag.source as? DragSource.Item)?.itemId
+        val hit = ws.itemsOn(page.id).firstOrNull { item ->
+            val r = item.rect
+            val mx = r.width * MERGE_EDGE
+            val my = r.height * MERGE_EDGE
+            item.id != draggedId && LayoutEngine.acceptsMerge(item) &&
+                cx in (r.x + mx)..(r.right - mx) && cy in (r.y + my)..(r.bottom - my)
+        } ?: return null
+        val folderSource = drag.source as? DragSource.FolderApp
+        if (folderSource?.folderItemId == hit.id) return null
+        return DropTarget.Merge(pageIndex, hit.id)
     }
 
     /** ウィジェット上の横ドラッグでページを動かす。 */
@@ -199,6 +242,9 @@ class HomeController(
         const val MEASURE_SETTLE_MS = 500L
         const val MEASURE_PHASE_MS = 2_000L
         const val MEASURE_CYCLES = 3
+
+        /** 重ねてまとめる判定から外す、項目の端の幅（項目の大きさに対する比率）。 */
+        const val MERGE_EDGE = 0.2f
 
         /** これより速い横ドラッグは、半分に届かなくても次のページへ送る（px/秒）。 */
         const val FLING_VELOCITY = 800f

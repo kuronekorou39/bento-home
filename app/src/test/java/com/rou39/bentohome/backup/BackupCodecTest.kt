@@ -86,7 +86,25 @@ class BackupCodecTest {
             BackupCodec.decode(text.replace("bento-home-backup", "other-app"))
         }
         assertThrows(IllegalArgumentException::class.java) {
-            BackupCodec.decode(text.replace("\"schemaVersion\": 1", "\"schemaVersion\": 99"))
+            BackupCodec.decode(text.replace("\"schemaVersion\": ${BackupFile.SCHEMA_VERSION}", "\"schemaVersion\": 99"))
         }
+    }
+
+    @Test
+    fun foldersRoundTripAndDropMissingApps() {
+        val other = AppRef("com.other/.Main", 0)
+        val ws = workspace.copy(
+            items = workspace.items + listOf(
+                WorkspaceItem(10, 1, CellRect(0, 4, 2, 2), ItemContent.Folder("仕事", listOf(chat, other, gone))),
+                WorkspaceItem(11, 1, CellRect(2, 4, 2, 2), ItemContent.Folder("消える", listOf(chat, gone))),
+            ),
+        )
+        val file = BackupCodec.decode(
+            BackupCodec.encode(BackupCodec.fromState(ws, settings, appearances, null, exportedAt = 1, appVersion = "x")),
+        )
+        val plan = BackupCodec.toRestorePlan(file, { it != gone }, LauncherSettings())
+        assertEquals(ItemContent.Folder("仕事", listOf(chat, other)), plan.workspace.item(10)!!.content)
+        // この端末に無いアプリを除くと1つになるフォルダーはアプリに戻る
+        assertEquals(ItemContent.App(chat), plan.workspace.item(11)!!.content)
     }
 }

@@ -8,6 +8,7 @@ import com.rou39.bentohome.layout.CellRect
 import com.rou39.bentohome.layout.DockSlot
 import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.ItemContent
+import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Page
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
@@ -36,7 +37,8 @@ data class BackupFile(
 ) {
     companion object {
         const val FORMAT = "bento-home-backup"
-        const val SCHEMA_VERSION = 1
+        /** v2: フォルダー（BackupItem.title・apps）を追加。 */
+        const val SCHEMA_VERSION = 2
     }
 }
 
@@ -73,12 +75,19 @@ data class BackupItem(
     val component: String? = null,
     val profileSerial: Long? = null,
     val widgetProvider: String? = null,
+    /** フォルダーの名前と中のアプリ（v2）。 */
+    val title: String? = null,
+    val apps: List<BackupApp>? = null,
 ) {
     companion object {
         const val TYPE_APP = "app"
         const val TYPE_WIDGET = "widget"
+        const val TYPE_FOLDER = "folder"
     }
 }
+
+@Serializable
+data class BackupApp(val component: String, val profileSerial: Long)
 
 @Serializable
 data class BackupDock(val slot: Int, val component: String, val profileSerial: Long)
@@ -170,6 +179,10 @@ object BackupCodec {
                     item.id, item.pageId, BackupItem.TYPE_WIDGET, r.x, r.y, r.width, r.height,
                     widgetProvider = c.provider,
                 )
+                is ItemContent.Folder -> BackupItem(
+                    item.id, item.pageId, BackupItem.TYPE_FOLDER, r.x, r.y, r.width, r.height,
+                    title = c.title, apps = c.apps.map { BackupApp(it.component, it.profileSerial) },
+                )
             }
         },
         dock = workspace.dock.map { BackupDock(it.slot, it.app.component, it.app.profileSerial) },
@@ -207,6 +220,13 @@ object BackupCodec {
                     widgets++
                     WorkspaceItem(b.id, b.pageId, rect, ItemContent.Widget(ItemContent.Widget.NO_ID, b.widgetProvider.orEmpty()))
                 }
+                BackupItem.TYPE_FOLDER -> {
+                    val (present, missing) = b.apps.orEmpty().map { AppRef(it.component, it.profileSerial) }
+                        .distinct().partition(isInstalled)
+                    skipped += missing.size
+                    val folder = ItemContent.Folder(b.title ?: ItemContent.Folder.DEFAULT_TITLE, present)
+                    WorkspaceItem(b.id, b.pageId, rect, folder)
+                }
                 else -> null
             }
         }
@@ -239,7 +259,9 @@ object BackupCodec {
         val usage = file.usage?.associate {
             AppRef(it.component, it.profileSerial) to AppUsage(it.daily, it.observedSince, it.lastLaunchAt)
         }
-        return RestorePlan(Workspace(pages, items, dock), settings, appearances, usage, skipped, widgets)
+        // この端末に無いアプリを除いて中が1つ以下になったフォルダーは、アプリに戻すか消す
+        val workspace = LayoutEngine.normalizeFolders(Workspace(pages, items, dock))
+        return RestorePlan(workspace, settings, appearances, usage, skipped, widgets)
     }
 
     private inline fun <reified E : Enum<E>> enumOrNull(name: String): E? =

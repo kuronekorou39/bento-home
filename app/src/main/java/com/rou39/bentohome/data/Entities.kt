@@ -30,7 +30,7 @@ data class PageEntity(
 data class ItemEntity(
     @PrimaryKey val id: Long,
     val pageId: Long,
-    /** [TYPE_APP] または [TYPE_WIDGET] */
+    /** [TYPE_APP]・[TYPE_WIDGET]・[TYPE_FOLDER] */
     val type: String,
     val cellX: Int,
     val cellY: Int,
@@ -40,12 +40,35 @@ data class ItemEntity(
     val profileSerial: Long?,
     val widgetId: Int?,
     val widgetProvider: String?,
+    /** フォルダーの名前（v4）。中のアプリは [FolderAppEntity]。 */
+    val title: String? = null,
 ) {
     companion object {
         const val TYPE_APP = "APP"
         const val TYPE_WIDGET = "WIDGET"
+        const val TYPE_FOLDER = "FOLDER"
     }
 }
+
+/** フォルダーの中のアプリ（v4、plan.md §10）。position は表示順。 */
+@Entity(
+    tableName = "folder_app",
+    primaryKeys = ["itemId", "position"],
+    foreignKeys = [
+        ForeignKey(
+            entity = ItemEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["itemId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class FolderAppEntity(
+    val itemId: Long,
+    val position: Int,
+    val component: String,
+    val profileSerial: Long,
+)
 
 @Entity(tableName = "dock_item")
 data class DockEntity(

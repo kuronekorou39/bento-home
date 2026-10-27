@@ -44,6 +44,13 @@ sealed interface ItemContent {
             const val NO_ID = -1
         }
     }
+
+    /** アプリをまとめたフォルダー（plan.md §10）。中が1つ以下になったら [LayoutEngine] がアプリに戻すか消す。 */
+    data class Folder(val title: String, val apps: List<AppRef>) : ItemContent {
+        companion object {
+            const val DEFAULT_TITLE = "フォルダー"
+        }
+    }
 }
 
 data class WorkspaceItem(val id: Long, val pageId: Long, val rect: CellRect, val content: ItemContent)
@@ -72,6 +79,16 @@ data class Workspace(
     fun nextItemId(): Long = (items.maxOfOrNull { it.id } ?: 0L) + 1
 
     fun nextPageId(): Long = (pages.maxOfOrNull { it.id } ?: 0L) + 1
+
+    /** ホーム（フォルダーの中を含む）とドックに置いたアプリの数。 */
+    val appCount: Int
+        get() = dock.size + items.sumOf {
+            when (val c = it.content) {
+                is ItemContent.App -> 1
+                is ItemContent.Folder -> c.apps.size
+                is ItemContent.Widget -> 0
+            }
+        }
 
     val widgetIds: Set<Int>
         get() = items.mapNotNullTo(HashSet()) {

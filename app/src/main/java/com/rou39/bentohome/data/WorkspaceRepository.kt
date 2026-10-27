@@ -26,24 +26,36 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
         // StateFlow なので連続した変更は最新だけが書かれる
         appScope.launch(Dispatchers.IO) {
             pendingSave.filterNotNull().collect { ws ->
-                runCatching { dao.replaceAll(ws.pages.map(::toEntity), ws.items.map(::toEntity), ws.dock.map(::toEntity)) }
+                runCatching { dao.replaceAll(toRows(ws)) }
                     .onFailure { Log.e(TAG, "save failed", it) }
             }
         }
     }
 
     suspend fun load(): Workspace {
-        val (pages, items, dock) = dao.loadAll()
+        val rows = dao.loadAll()
+        val folders = rows.folderApps.groupBy({ it.itemId }, { AppRef(it.component, it.profileSerial) })
         return Workspace(
-            pages = pages.map { Page(it.id, it.position, GridSpec(it.baseColumns, it.baseRows, it.subdivisions)) },
-            items = items.mapNotNull(::toModel),
-            dock = dock.map { DockSlot(it.slot, AppRef(it.component, it.profileSerial)) },
+            pages = rows.pages.map { Page(it.id, it.position, GridSpec(it.baseColumns, it.baseRows, it.subdivisions)) },
+            items = rows.items.mapNotNull { toModel(it, folders[it.id].orEmpty()) },
+            dock = rows.dock.map { DockSlot(it.slot, AppRef(it.component, it.profileSerial)) },
         )
     }
 
     fun save(ws: Workspace) {
         pendingSave.value = ws
     }
+
+    private fun toRows(ws: Workspace) = WorkspaceRows(
+        pages = ws.pages.map(::toEntity),
+        items = ws.items.map(::toEntity),
+        dock = ws.dock.map(::toEntity),
+        folderApps = ws.items.flatMap { item ->
+            (item.content as? ItemContent.Folder)?.apps.orEmpty().mapIndexed { i, app ->
+                FolderAppEntity(item.id, i, app.component, app.profileSerial)
+            }
+        },
+    )
 
     private fun toEntity(page: Page) = PageEntity(
         id = page.id,
@@ -64,18 +76,27 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
                 item.id, item.pageId, ItemEntity.TYPE_WIDGET, r.x, r.y, r.width, r.height,
                 component = null, profileSerial = null, widgetId = c.widgetId, widgetProvider = c.provider,
             )
+            is ItemContent.Folder -> ItemEntity(
+                item.id, item.pageId, ItemEntity.TYPE_FOLDER, r.x, r.y, r.width, r.height,
+                component = null, profileSerial = null, widgetId = null, widgetProvider = null, title = c.title,
+            )
         }
     }
 
     private fun toEntity(slot: DockSlot) = DockEntity(slot.slot, slot.app.component, slot.app.profileSerial)
 
-    private fun toModel(e: ItemEntity): WorkspaceItem? {
+    private fun toModel(e: ItemEntity, folderApps: List<AppRef>): WorkspaceItem? {
         val content = when (e.type) {
             ItemEntity.TYPE_APP -> {
                 val component = e.component ?: return null
                 ItemContent.App(AppRef(component, e.profileSerial ?: 0))
             }
             ItemEntity.TYPE_WIDGET -> ItemContent.Widget(e.widgetId ?: return null, e.widgetProvider.orEmpty())
+            ItemEntity.TYPE_FOLDER -> when (folderApps.size) {
+                0 -> return null
+                1 -> ItemContent.App(folderApps.single())
+                else -> ItemContent.Folder(e.title ?: ItemContent.Folder.DEFAULT_TITLE, folderApps)
+            }
             else -> return null
         }
         return WorkspaceItem(e.id, e.pageId, CellRect(e.cellX, e.cellY, e.spanX, e.spanY), content)
