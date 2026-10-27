@@ -32,6 +32,25 @@ enum class LabelSize(val label: String, val sp: Int) {
 }
 
 /** アプリ一覧の並び順（plan.md §2）。 */
+/** 灰色にする段階の日数（plan.md §10）。越えるたびに色を抜く。 */
+enum class GrayStages(val days: List<Int>) {
+    SHORT(listOf(7, 14, 30)),
+    MEDIUM(listOf(14, 30, 60)),
+    LONG(listOf(30, 60, 90)),
+    ;
+
+    val label: String get() = days.joinToString("・") + "日"
+
+    companion object {
+        /** 段階を入れる前の「薄くするまでの日数」から、始まりが近いものを選ぶ。 */
+        fun fromLegacyDays(days: Int): GrayStages = when {
+            days <= 7 -> SHORT
+            days <= 14 -> MEDIUM
+            else -> LONG
+        }
+    }
+}
+
 enum class DrawerSort(val label: String) {
     NAME("名前順"),
     FREQUENT("よく使う順"),
@@ -52,7 +71,7 @@ data class LauncherSettings(
     val drawerSort: DrawerSort = DrawerSort.NAME,
     val grayOnHome: Boolean = true,
     val grayInDrawer: Boolean = true,
-    val grayDays: Int = 30,
+    val grayStages: GrayStages = GrayStages.MEDIUM,
     /** ホームの背景を下にスワイプして通知パネルを開く（plan.md §10）。 */
     val swipeDownNotifications: Boolean = true,
 ) {
@@ -62,7 +81,6 @@ data class LauncherSettings(
         val ROWS_RANGE = 4..8
         val DOCK_SLOTS_RANGE = 3..6
         val ICON_SIZE_RANGE = 40..72
-        val GRAY_DAYS_OPTIONS = listOf(7, 14, 30, 60)
     }
 }
 
@@ -83,7 +101,9 @@ class SettingsRepository(private val context: Context) {
         val drawerSort = stringPreferencesKey("drawer_sort")
         val grayOnHome = booleanPreferencesKey("gray_on_home")
         val grayInDrawer = booleanPreferencesKey("gray_in_drawer")
-        val grayDays = intPreferencesKey("gray_days")
+        /** 段階を入れる前の設定。読むだけ（gray_stages が無いときの移行に使う）。 */
+        val legacyGrayDays = intPreferencesKey("gray_days")
+        val grayStages = stringPreferencesKey("gray_stages")
         val swipeDownNotifications = booleanPreferencesKey("swipe_down_notifications")
     }
 
@@ -105,7 +125,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.drawerSort] = s.drawerSort.name
             p[Keys.grayOnHome] = s.grayOnHome
             p[Keys.grayInDrawer] = s.grayInDrawer
-            p[Keys.grayDays] = s.grayDays
+            p[Keys.grayStages] = s.grayStages.name
             p[Keys.swipeDownNotifications] = s.swipeDownNotifications
         }
     }
@@ -128,7 +148,9 @@ class SettingsRepository(private val context: Context) {
             drawerSort = enumOr(p[Keys.drawerSort], d.drawerSort),
             grayOnHome = p[Keys.grayOnHome] ?: d.grayOnHome,
             grayInDrawer = p[Keys.grayInDrawer] ?: d.grayInDrawer,
-            grayDays = p[Keys.grayDays] ?: d.grayDays,
+            grayStages = p[Keys.grayStages]?.let { runCatching { GrayStages.valueOf(it) }.getOrNull() }
+                ?: p[Keys.legacyGrayDays]?.let(GrayStages::fromLegacyDays)
+                ?: d.grayStages,
             swipeDownNotifications = p[Keys.swipeDownNotifications] ?: d.swipeDownNotifications,
         )
     }

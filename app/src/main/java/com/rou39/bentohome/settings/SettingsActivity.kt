@@ -59,6 +59,7 @@ import com.rou39.bentohome.container
 import com.rou39.bentohome.data.BadgeMode
 import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.data.LabelSize
+import com.rou39.bentohome.data.GrayStages
 import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.LayoutEngine
@@ -185,10 +186,14 @@ class SettingsActivity : ComponentActivity() {
                         SwitchRow("アプリ一覧で、使っていないアプリを薄く表示", s.grayInDrawer) { v ->
                             update { it.copy(grayInDrawer = v) }
                         }
-                        Text("薄く表示するまでの日数")
-                        Chips(LauncherSettings.GRAY_DAYS_OPTIONS, s.grayDays, { "${it}日" }) { v ->
-                            update { it.copy(grayDays = v) }
+                        Text("薄くする段階（使っていない日数）")
+                        Chips(GrayStages.entries, s.grayStages, { it.label }) { v ->
+                            update { it.copy(grayStages = v) }
                         }
+                        Text(
+                            "最初の日数で少し薄くし、次の日数でさらに薄く、最後の日数で灰色にします。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         Text(
                             "起動できなくなることはありません。通知バッジのあるアプリ、通常の色を維持にしたアプリ、" +
                                 "観測を始めてから日が浅いアプリは薄くしません。",

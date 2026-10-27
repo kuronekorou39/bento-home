@@ -2,6 +2,7 @@ package com.rou39.bentohome.backup
 
 import com.rou39.bentohome.data.AppAppearance
 import com.rou39.bentohome.data.BadgeMode
+import com.rou39.bentohome.data.GrayStages
 import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.CellRect
@@ -41,8 +42,9 @@ data class BackupFile(
         /**
          * v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。
          * v4: アプリの非表示と表示名（BackupAppearance.hidden・label）。v5: ページの仕切り（BackupPage.partition）。
+         * v6: 灰色の段階（BackupSettings.grayStages）。
          */
-        const val SCHEMA_VERSION = 5
+        const val SCHEMA_VERSION = 6
     }
 }
 
@@ -61,7 +63,10 @@ data class BackupSettings(
     val drawerSort: String,
     val grayOnHome: Boolean,
     val grayInDrawer: Boolean,
+    /** 段階を入れる前の項目。書くときは最初の段階の日数を入れる。 */
     val grayDays: Int,
+    /** v6: 灰色の段階。無ければ grayDays から決める。 */
+    val grayStages: String? = null,
     val swipeDownNotifications: Boolean = true,
 )
 
@@ -180,7 +185,8 @@ object BackupCodec {
             drawerSort = settings.drawerSort.name,
             grayOnHome = settings.grayOnHome,
             grayInDrawer = settings.grayInDrawer,
-            grayDays = settings.grayDays,
+            grayDays = settings.grayStages.days.first(),
+            grayStages = settings.grayStages.name,
             swipeDownNotifications = settings.swipeDownNotifications,
         ),
         pages = workspace.orderedPages.map {
@@ -287,7 +293,7 @@ object BackupCodec {
             drawerSort = enumOrNull(s.drawerSort) ?: defaults.drawerSort,
             grayOnHome = s.grayOnHome,
             grayInDrawer = s.grayInDrawer,
-            grayDays = s.grayDays,
+            grayStages = s.grayStages?.let { enumOrNull<GrayStages>(it) } ?: GrayStages.fromLegacyDays(s.grayDays),
             swipeDownNotifications = s.swipeDownNotifications,
         )
         val appearances = file.appearances.associate {

@@ -18,15 +18,16 @@ data class AppUsage(
 /** 並び替えの入力。excluded は「頻度集計から除外」。 */
 data class RankInput(val app: AppRef, val label: String, val usage: AppUsage?, val excluded: Boolean)
 
-/** グレー表示の理由。長押しで表示する。 */
+/** グレー表示の理由。長押しで表示する。level は灰色の段階（1〜、大きいほど色を抜く、plan.md §10）。 */
 sealed interface GrayReason {
     val days: Int
+    val level: Int
 
     /** 最後の起動から days 日。 */
-    data class NotLaunchedSince(override val days: Int) : GrayReason
+    data class NotLaunchedSince(override val days: Int, override val level: Int) : GrayReason
 
     /** 観測を始めてから days 日、一度も起動していない。 */
-    data class NeverLaunched(override val days: Int) : GrayReason
+    data class NeverLaunched(override val days: Int, override val level: Int) : GrayReason
 }
 
 object UsagePolicy {
@@ -74,17 +75,16 @@ object UsagePolicy {
     /**
      * グレー表示にするか（plan.md §4）。
      * 通常色に固定したアプリ・バッジのあるアプリは対象外。観測前・観測開始から日が浅いアプリは「未使用」と断定しない。
+     * stages は段階ごとの日数（昇順）。越えた数が段階になり、最初の日数に届かなければ null（plan.md §10）。
      */
-    fun grayReason(usage: AppUsage?, now: Long, grayDays: Int, keepColor: Boolean, hasBadge: Boolean): GrayReason? {
+    fun grayReason(usage: AppUsage?, now: Long, stages: List<Int>, keepColor: Boolean, hasBadge: Boolean): GrayReason? {
         if (keepColor || hasBadge || usage == null) return null
         val last = usage.lastLaunchAt
-        if (last != null) {
-            val days = daysBetween(last, now)
-            return if (days >= grayDays) GrayReason.NotLaunchedSince(days) else null
-        }
-        val since = usage.observedSince ?: return null
+        val since = if (last != null) last else usage.observedSince ?: return null
         val days = daysBetween(since, now)
-        return if (days >= grayDays) GrayReason.NeverLaunched(days) else null
+        val level = stages.count { days >= it }
+        if (level == 0) return null
+        return if (last != null) GrayReason.NotLaunchedSince(days, level) else GrayReason.NeverLaunched(days, level)
     }
 
     private fun daysBetween(from: Long, to: Long): Int = ((to - from).coerceAtLeast(0) / DAY_MS).toInt()

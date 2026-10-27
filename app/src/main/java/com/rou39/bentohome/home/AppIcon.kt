@@ -92,8 +92,10 @@ fun AppIconView(
     badge: BadgeDisplay?,
     labelSizeSp: Int?,
     modifier: Modifier = Modifier,
-    gray: Boolean = false,
+    /** 灰色の段階。0 なら通常の色（plan.md §10）。 */
+    grayLevel: Int = 0,
 ) {
+    val gray = grayLevel > 0
     Column(
         modifier = modifier.semantics {
             if (gray) stateDescription = "しばらく使っていません"
@@ -110,8 +112,8 @@ fun AppIconView(
                     // ラベルを表示しているときは、名前を二重に読まないよう画像には説明を付けない
                     contentDescription = if (labelSizeSp == null) entry?.label else null,
                     modifier = Modifier.fillMaxSize(),
-                    colorFilter = if (gray) GRAY_FILTER else null,
-                    alpha = if (gray) GRAY_ALPHA else 1f,
+                    colorFilter = grayFilter(grayLevel),
+                    alpha = grayAlpha(grayLevel),
                 )
                 entry == null -> Box(
                     contentAlignment = Alignment.Center,
@@ -171,8 +173,14 @@ fun IconLabel(text: String, labelSizeSp: Int) {
 }
 
 private val BADGE_COLOR = Color(0xFFD93025)
-private val GRAY_FILTER = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
-private const val GRAY_ALPHA = 0.7f
+/** 段階ごとの彩度と不透明度。段階が進むほど色を抜く（plan.md §10）。ラベルは変えない。 */
+private val GRAY_SATURATION = listOf(0.55f, 0.25f, 0f)
+private val GRAY_ALPHA = listOf(0.92f, 0.82f, 0.7f)
+private val GRAY_FILTERS = GRAY_SATURATION.map { s -> ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(s) }) }
+
+private fun grayFilter(level: Int): ColorFilter? = if (level <= 0) null else GRAY_FILTERS[(level - 1).coerceAtMost(GRAY_FILTERS.lastIndex)]
+
+private fun grayAlpha(level: Int): Float = if (level <= 0) 1f else GRAY_ALPHA[(level - 1).coerceAtMost(GRAY_ALPHA.lastIndex)]
 
 /** 長押しメニューに出すグレー表示の理由。 */
 fun GrayReason.describe(): String = when (this) {

@@ -176,7 +176,7 @@ fun HomeScreen(
         entry?.let {
             val hasBadge = (counts?.get(BadgeKey(it.packageName, it.ref.profileSerial)) ?: 0) > 0
             UsagePolicy.grayReason(
-                usage[it.ref], now, settings.grayDays, appearances[it.ref]?.keepColor == true, hasBadge,
+                usage[it.ref], now, settings.grayStages.days, appearances[it.ref]?.keepColor == true, hasBadge,
             )
         }
     }
@@ -709,7 +709,7 @@ private fun HomeAppCell(
         AppIconView(
             entry, controller.vm.iconCache, iconSize, style.shape, badgeFor(entry),
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
-            gray = gray != null,
+            grayLevel = gray?.level ?: 0,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
@@ -979,7 +979,7 @@ private fun DockAppCell(
         AppIconView(
             entry, controller.vm.iconCache, min(style.iconSize, DOCK_HEIGHT - 16.dp), style.shape, badgeFor(entry),
             labelSizeSp = null,
-            gray = gray != null,
+            grayLevel = gray?.level ?: 0,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)

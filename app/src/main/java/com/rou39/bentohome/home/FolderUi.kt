@@ -302,7 +302,7 @@ private fun FolderAppCell(
         AppIconView(
             entry, vm.iconCache, style.iconSize, style.shape, badgeFor(entry),
             labelSizeSp = style.labelSizeSp,
-            gray = gray != null,
+            grayLevel = gray?.level ?: 0,
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)

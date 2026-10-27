@@ -66,28 +66,41 @@ class UsagePolicyTest {
     @Test
     fun grayAfterThresholdSinceLastLaunch() {
         val usage = AppUsage(observedSince = now - 100 * day, lastLaunchAt = now - 30 * day)
-        assertEquals(GrayReason.NotLaunchedSince(30), UsagePolicy.grayReason(usage, now, 30, false, false))
-        assertNull(UsagePolicy.grayReason(usage.copy(lastLaunchAt = now - 29 * day), now, 30, false, false))
+        assertEquals(GrayReason.NotLaunchedSince(30, 1), UsagePolicy.grayReason(usage, now, STAGES, false, false))
+        assertNull(UsagePolicy.grayReason(usage.copy(lastLaunchAt = now - 29 * day), now, STAGES, false, false))
     }
 
     @Test
     fun neverLaunchedIsGrayOnlyAfterEnoughObservation() {
         val fresh = AppUsage(observedSince = now - 3 * day)
-        assertNull(UsagePolicy.grayReason(fresh, now, 30, false, false))
+        assertNull(UsagePolicy.grayReason(fresh, now, STAGES, false, false))
         val old = AppUsage(observedSince = now - 45 * day)
-        assertEquals(GrayReason.NeverLaunched(45), UsagePolicy.grayReason(old, now, 30, false, false))
+        assertEquals(GrayReason.NeverLaunched(45, 1), UsagePolicy.grayReason(old, now, STAGES, false, false))
     }
 
     @Test
     fun unknownHistoryIsNeverGray() {
-        assertNull(UsagePolicy.grayReason(null, now, 30, false, false))
-        assertNull(UsagePolicy.grayReason(AppUsage(), now, 30, false, false))
+        assertNull(UsagePolicy.grayReason(null, now, STAGES, false, false))
+        assertNull(UsagePolicy.grayReason(AppUsage(), now, STAGES, false, false))
     }
 
     @Test
     fun keepColorAndBadgeOverrideGray() {
         val old = AppUsage(observedSince = now - 90 * day)
-        assertNull(UsagePolicy.grayReason(old, now, 30, keepColor = true, hasBadge = false))
-        assertNull(UsagePolicy.grayReason(old, now, 30, keepColor = false, hasBadge = true))
+        assertNull(UsagePolicy.grayReason(old, now, STAGES, keepColor = true, hasBadge = false))
+        assertNull(UsagePolicy.grayReason(old, now, STAGES, keepColor = false, hasBadge = true))
+    }
+
+    @Test
+    fun levelGrowsWithEachStage() {
+        val now = 200L * day
+        fun level(daysAgo: Int) = UsagePolicy.grayReason(
+            AppUsage(observedSince = 0, lastLaunchAt = now - daysAgo * day), now, STAGES, false, false,
+        )?.level ?: 0
+        assertEquals(listOf(0, 1, 1, 2, 3, 3), listOf(29, 30, 59, 60, 90, 150).map(::level))
+    }
+
+    private companion object {
+        val STAGES = listOf(30, 60, 90)
     }
 }

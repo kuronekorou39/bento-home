@@ -44,11 +44,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.draw.clip
@@ -102,6 +104,15 @@ fun AppDrawer(
             DrawerSort.RECENT -> UsagePolicy.sortByRecent(rankInputs(listed))
         }
     }
+    // よく使う順・最近開いた順では、Bento から開いた記録が無いアプリ（集計から除外したアプリを含む）は
+    // 同じ順位になるので、区切って後ろにまとめる（記録はこのランチャーで開いた分だけ、plan.md §4）
+    val unrecorded = remember(sort) {
+        if (sort == DrawerSort.NAME) {
+            emptySet()
+        } else {
+            rankInputs(listed).filter { it.excluded || it.usage?.lastLaunchAt == null }.mapTo(HashSet()) { it.app }
+        }
+    }
     val ordered = remember(frozenOrder, listed) {
         val byRef = listed.associateBy { it.ref }
         val known = frozenOrder.toHashSet()
@@ -119,6 +130,10 @@ fun AppDrawer(
             }
         }
     }
+    // 並び順を切り替えたら先頭へ戻す。戻さないと、上に見えていたアプリの位置を保とうとして、
+    // 並べ替えた後の先頭（よく使うアプリや区切り）が画面の外に隠れる
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(sort) { gridState.scrollToItem(0) }
     val closeThreshold = with(LocalDensity.current) { 96.dp.toPx() }
     // 一覧の先頭でさらに下へ引くと閉じる
     val pullToClose = remember {
@@ -194,16 +209,35 @@ fun AppDrawer(
             Text("${filtered.size} 件", color = Color.LightGray, fontSize = 12.sp, maxLines = 1, softWrap = false)
         }
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Fixed(4),
             modifier = Modifier.weight(1f).fillMaxWidth().nestedScroll(pullToClose),
         ) {
-            items(filtered, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
+            val (recorded, rest) = if (sort == DrawerSort.NAME) {
+                filtered to emptyList()
+            } else {
+                // 一覧を開いた後に入ったアプリも、まだ記録が無いので後ろへ
+                val known = frozenOrder.toHashSet()
+                filtered.partition { it.ref in known && it.ref !in unrecorded }
+            }
+            items(recorded, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
                 DrawerTile(
                     controller, entry, badgeFor(entry), grayFor(entry),
                     isHidden = entry.ref in hidden,
                     selectMode = selectMode,
                     selected = entry.ref in controller.selectedApps,
                 )
+            }
+            if (rest.isNotEmpty()) {
+                item(key = "unrecorded-header", span = { GridItemSpan(maxLineSpan) }) { UnrecordedHeader(recorded.isEmpty()) }
+                items(rest, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
+                    DrawerTile(
+                        controller, entry, badgeFor(entry), grayFor(entry),
+                        isHidden = entry.ref in hidden,
+                        selectMode = selectMode,
+                        selected = entry.ref in controller.selectedApps,
+                    )
+                }
             }
             if (hiddenCount > 0) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -269,7 +303,7 @@ private fun DrawerTile(
             entry, controller.vm.iconCache, DRAWER_ICON_SIZE, style.shape, badge,
             labelSizeSp = style.labelSizeSp,
             modifier = Modifier.padding(horizontal = 4.dp),
-            gray = gray != null,
+            grayLevel = gray?.level ?: 0,
         )
         if (selected) {
             Box(
@@ -316,5 +350,19 @@ private fun SelectionBar(controller: HomeController) {
         TextButton(onClick = controller::clearSelection) { Text("キャンセル") }
         if (count == 1) TextButton(onClick = { controller.drawerMenuRef = controller.selectedApps.single() }) { Text("その他") }
         Button(onClick = { controller.overviewOpen = true }) { Text("ホームに追加") }
+    }
+}
+
+/** 記録の無いアプリの見出し。 */
+@Composable
+private fun UnrecordedHeader(onlyThese: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = if (onlyThese) 4.dp else 20.dp, bottom = 8.dp)) {
+        if (!onlyThese) HorizontalDivider(color = Color.White.copy(alpha = 0.2f), modifier = Modifier.padding(bottom = 12.dp))
+        Text("まだ Bento から開いていないアプリ（名前順）", color = Color.White, fontSize = 13.sp)
+        Text(
+            "記録は Bento を入れてから、このランチャーで開いた分だけです。集計から除外したアプリもここに並びます。",
+            color = Color.LightGray,
+            fontSize = 11.sp,
+        )
     }
 }
