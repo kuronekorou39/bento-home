@@ -32,7 +32,8 @@ private class CoordsHolder {
 }
 
 /**
- * アイコンの操作。タップで起動、長押しでメニュー、長押しのまま動かすとドラッグ。
+ * アイコンの操作。タップで起動。長押しが成立したら振動して「つまめる状態」にし、
+ * そのまま動かせばドラッグ、動かさずに離したらメニューを出す（メニューとドラッグを同時に出さない）。
  * 長押しが成立したら指を離すまでのイベントをすべて消費し、離したときにタップとして起動しない。
  * 座標は毎回ルート座標に変換するので、ドラッグ中にページが動いてもずれない。
  */
@@ -81,7 +82,6 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
                     }
 
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    cb.onLongPress()
                     dragging = false
                     do {
                         val event = awaitPointerEvent()
@@ -99,7 +99,7 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
                             if (dragging) cb.onDragMove(root)
                         }
                     } while (event.changes.any { it.pressed })
-                    if (dragging) cb.onDragEnd()
+                    if (dragging) cb.onDragEnd() else cb.onLongPress()
                     dragging = false
                 }
             } finally {
@@ -160,7 +160,6 @@ fun Modifier.widgetGestures(
                 when {
                     ended == null -> {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        cb.onLongPress()
                         var dragging = false
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -177,7 +176,7 @@ fun Modifier.widgetGestures(
                                 if (dragging) cb.onDragMove(root)
                             }
                         } while (event.changes.any { it.pressed })
-                        if (dragging) cb.onDragEnd()
+                        if (dragging) cb.onDragEnd() else cb.onLongPress()
                     }
                     horizontal -> {
                         // ページが動くとウィジェット自身も動くので、移動量はルート座標で測る

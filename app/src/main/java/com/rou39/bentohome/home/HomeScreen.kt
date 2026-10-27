@@ -5,6 +5,13 @@ import android.os.Bundle
 import android.util.SizeF
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -92,6 +99,7 @@ import com.rou39.bentohome.data.BadgeMode
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.CellRect
 import com.rou39.bentohome.layout.ItemContent
+import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.Page
 import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.ResizeLimits
@@ -109,6 +117,10 @@ private val DOCK_HEIGHT = 88.dp
 
 /** 画面端でこの時間止まると、ドラッグ中にページを送る。 */
 private const val EDGE_FLIP_DELAY_MS = 600L
+
+/** アプリ一覧の開閉の時間と、せり上がる距離（画面の高さに対する割合の逆数）。 */
+private const val DRAWER_ANIM_MS = 220
+private const val DRAWER_SLIDE_FRACTION = 3
 
 /** 画面の大きさが分かる前に使う、ページの横÷縦。 */
 private const val DEFAULT_PAGE_ASPECT = 0.6f
@@ -198,7 +210,7 @@ fun HomeScreen(
     }
     LaunchedEffect(vm) { vm.focusPage.collect { pagerState.animateScrollToPage(it) } }
     EdgeFlipEffect(controller)
-    WallpaperScrollEffect(pagerState)
+    WallpaperScrollEffect(pagerState, pages.size)
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(undo?.token) {
@@ -303,7 +315,12 @@ fun HomeScreen(
             }
         }
 
-        if (controller.drawerOpen) {
+        // 下からせり上がって開き、下へ戻って閉じる
+        AnimatedVisibility(
+            visible = controller.drawerOpen,
+            enter = slideInVertically(tween(DRAWER_ANIM_MS)) { it / DRAWER_SLIDE_FRACTION } + fadeIn(tween(DRAWER_ANIM_MS)),
+            exit = slideOutVertically(tween(DRAWER_ANIM_MS)) { it / DRAWER_SLIDE_FRACTION } + fadeOut(tween(DRAWER_ANIM_MS)),
+        ) {
             AppDrawer(
                 controller = controller,
                 apps = apps,
@@ -449,14 +466,19 @@ private fun Modifier.verticalSwipe(threshold: Float, onSwipeUp: () -> Unit, onSw
         },
     )
 
-/** ページ送りに合わせて壁紙を横に動かす（docs/design.md §6）。 */
+/**
+ * ページ送りに合わせて壁紙を横に動かす（docs/design.md §6）。壁紙の画像は OS の設定のもので、Bento は位置だけ伝える。
+ * ページ数は実際のページの数を使う。ドラッグ中に置き先として足す空のページを数えると、つまんだだけで壁紙がずれる。
+ */
 @Composable
-private fun WallpaperScrollEffect(pagerState: PagerState) {
+private fun WallpaperScrollEffect(pagerState: PagerState, realPageCount: Int) {
     val view = LocalView.current
     val wallpaper = remember { android.app.WallpaperManager.getInstance(view.context) }
+    val realCount by rememberUpdatedState(realPageCount)
     LaunchedEffect(pagerState) {
         snapshotFlow {
-            pagerState.pageCount to (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+            val count = realCount.coerceAtLeast(1)
+            count to (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceAtMost((count - 1).toFloat())
         }.collect { (count, position) ->
             val token = view.windowToken ?: return@collect
             val steps = if (count > 1) 1f / (count - 1) else 0f
@@ -544,6 +566,8 @@ private fun WorkspacePage(
             },
         )
 
+        // つまんで運んでいる間だけ、マス目の薄い線と半マスの点を出す
+        if (controller.drag.active) DragGuide(grid)
         if (page != null) {
             PartitionLayer(page.partition, maxWidth, maxHeight)
             for (item in workspace.itemsOn(page.id)) {
@@ -584,6 +608,32 @@ private fun WorkspacePage(
         }
     }
 }
+
+/** 運んでいる間の目安。マス目の線（薄い）と、半マスの交点の点（さらに薄い）。 */
+@Composable
+private fun DragGuide(grid: GridSpec) {
+    Canvas(Modifier.fillMaxSize()) {
+        val stepX = size.width / grid.columns
+        val stepY = size.height / grid.rows
+        val stroke = 1.dp.toPx()
+        for (i in 0..grid.columns) {
+            if (i % grid.subdivisions != 0) continue
+            drawLine(GUIDE_LINE, Offset(i * stepX, 0f), Offset(i * stepX, size.height), stroke)
+        }
+        for (j in 0..grid.rows) {
+            if (j % grid.subdivisions != 0) continue
+            drawLine(GUIDE_LINE, Offset(0f, j * stepY), Offset(size.width, j * stepY), stroke)
+        }
+        val r = 1.5.dp.toPx()
+        for (i in 1 until grid.columns) for (j in 1 until grid.rows) {
+            if (i % grid.subdivisions == 0 && j % grid.subdivisions == 0) continue
+            drawCircle(GUIDE_DOT, r, Offset(i * stepX, j * stepY))
+        }
+    }
+}
+
+private val GUIDE_LINE = Color.White.copy(alpha = 0.14f)
+private val GUIDE_DOT = Color.White.copy(alpha = 0.22f)
 
 private fun Modifier.cellPlacement(rect: CellRect, cellW: Dp, cellH: Dp): Modifier =
     this.offset(x = cellW * rect.x, y = cellH * rect.y).size(cellW * rect.width, cellH * rect.height)

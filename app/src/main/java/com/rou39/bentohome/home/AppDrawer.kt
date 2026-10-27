@@ -334,22 +334,31 @@ private fun DrawerTile(
     }
 }
 
-/** 選択中の操作。件数・取り消し・（1個なら）その他・ホームに追加。 */
+/**
+ * 選択中の操作。上の段に件数・キャンセル・その他、下の段に大きな「ホームに追加」。
+ * 「その他」（そのアプリの長押しメニュー）は1個のときだけ押せる。位置は変えず、表示が崩れないようにする。
+ */
 @Composable
 private fun SelectionBar(controller: HomeController) {
     val count = controller.selectedApps.size
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier
+    Column(
+        Modifier
             .fillMaxWidth()
             .background(Color(0xFF26262C))
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        Text("${count}個を選択中", color = Color.White, modifier = Modifier.weight(1f))
-        TextButton(onClick = controller::clearSelection) { Text("キャンセル") }
-        if (count == 1) TextButton(onClick = { controller.drawerMenuRef = controller.selectedApps.single() }) { Text("その他") }
-        Button(onClick = { controller.overviewOpen = true }) { Text("ホームに追加") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${count}個を選択中", color = Color.White, maxLines = 1, modifier = Modifier.weight(1f))
+            TextButton(onClick = controller::clearSelection) { Text("キャンセル") }
+            TextButton(
+                onClick = { controller.drawerMenuRef = controller.selectedApps.singleOrNull() },
+                enabled = count == 1,
+            ) { Text("その他") }
+        }
+        Button(
+            onClick = { controller.overviewOpen = true },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) { Text("ホームに追加（${count}個）", fontSize = 16.sp) }
     }
 }
 
