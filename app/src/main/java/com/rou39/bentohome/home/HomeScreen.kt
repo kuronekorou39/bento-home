@@ -93,6 +93,7 @@ import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.CellRect
 import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.layout.Page
+import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.ResizeLimits
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
@@ -335,6 +336,10 @@ fun HomeScreen(
                             onOpenWidgetPicker()
                         })
                     }
+                    DropdownMenuItem(text = { Text("仕切り") }, onClick = {
+                        controller.backgroundMenuAt = null
+                        controller.partitionPickerOpen = true
+                    })
                     if (undo != null) {
                         DropdownMenuItem(text = { Text("直前の操作を元に戻す") }, onClick = {
                             controller.backgroundMenuAt = null
@@ -359,6 +364,18 @@ fun HomeScreen(
                     })
                 }
             }
+        }
+
+        if (controller.partitionPickerOpen) {
+            val page = workspace.pageAt(pagerState.currentPage)
+            PartitionPicker(
+                current = page?.partition ?: Partition.NONE,
+                onPick = {
+                    controller.partitionPickerOpen = false
+                    vm.setPartition(pagerState.currentPage, it)
+                },
+                onDismiss = { controller.partitionPickerOpen = false },
+            )
         }
 
         controller.measuring?.let { MeasuringOverlay(it, controller.measureEndsAt) }
@@ -505,6 +522,7 @@ private fun WorkspacePage(
         )
 
         if (page != null) {
+            PartitionLayer(page.partition, maxWidth, maxHeight)
             for (item in workspace.itemsOn(page.id)) {
                 key(item.id) {
                     val dragged = (controller.drag.source as? DragSource.Item)?.itemId == item.id

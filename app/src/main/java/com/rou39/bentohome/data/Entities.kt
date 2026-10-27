@@ -14,6 +14,8 @@ data class PageEntity(
     val baseColumns: Int,
     val baseRows: Int,
     val subdivisions: Int,
+    /** 仕切りのプリセット名（v7、plan.md §10）。 */
+    @ColumnInfo(defaultValue = "NONE") val partition: String = "NONE",
 )
 
 @Entity(

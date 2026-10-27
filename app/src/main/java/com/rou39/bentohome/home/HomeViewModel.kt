@@ -19,6 +19,7 @@ import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Page
+import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.Placement
 import com.rou39.bentohome.layout.ResizeLimits
 import com.rou39.bentohome.layout.WidgetSizing
@@ -326,6 +327,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 if (info == null) widgetHost.delete(item.widgetId) else placeNewWidget(item.widgetId, info)
             }
         }
+    }
+
+    // ---- 仕切り（plan.md §10） ----
+
+    fun setPartition(pageIndex: Int, partition: Partition) {
+        val ws = _workspace.value ?: return
+        val page = ws.pageAt(pageIndex) ?: return
+        if (page.partition == partition) return
+        commit(LayoutEngine.setPartition(ws, page.id, partition), message = "仕切りを「${partition.label}」にしました")
     }
 
     // ---- フォルダー（plan.md §10） ----

@@ -7,6 +7,7 @@ import com.rou39.bentohome.layout.DockSlot
 import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.layout.Page
+import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +37,9 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
         val rows = dao.loadAll()
         val folders = rows.folderApps.groupBy({ it.itemId }, { AppRef(it.component, it.profileSerial) })
         return Workspace(
-            pages = rows.pages.map { Page(it.id, it.position, GridSpec(it.baseColumns, it.baseRows, it.subdivisions)) },
+            pages = rows.pages.map {
+                Page(it.id, it.position, GridSpec(it.baseColumns, it.baseRows, it.subdivisions), Partition.fromName(it.partition))
+            },
             items = rows.items.mapNotNull { toModel(it, folders[it.id].orEmpty()) },
             dock = rows.dock.map { DockSlot(it.slot, AppRef(it.component, it.profileSerial)) },
         )
@@ -63,6 +66,7 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
         baseColumns = page.grid.baseColumns,
         baseRows = page.grid.baseRows,
         subdivisions = page.grid.subdivisions,
+        partition = page.partition.name,
     )
 
     private fun toEntity(item: WorkspaceItem): ItemEntity {

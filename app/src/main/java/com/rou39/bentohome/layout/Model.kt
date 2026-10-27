@@ -66,7 +66,7 @@ sealed interface ItemContent {
 
 data class WorkspaceItem(val id: Long, val pageId: Long, val rect: CellRect, val content: ItemContent)
 
-data class Page(val id: Long, val order: Int, val grid: GridSpec)
+data class Page(val id: Long, val order: Int, val grid: GridSpec, val partition: Partition = Partition.NONE)
 
 data class DockSlot(val slot: Int, val app: AppRef)
 

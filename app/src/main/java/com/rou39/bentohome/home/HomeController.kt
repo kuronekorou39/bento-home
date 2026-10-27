@@ -43,6 +43,9 @@ class HomeController(
     /** リサイズ中のウィジェット項目。null ならリサイズしていない。 */
     var resizingItemId by mutableStateOf<Long?>(null)
 
+    /** 仕切りを選ぶダイアログを開いているか。 */
+    var partitionPickerOpen by mutableStateOf(false)
+
     /** 開いているフォルダーの項目 ID。null なら閉じている。 */
     var openFolderId by mutableStateOf<Long?>(null)
 
@@ -82,6 +85,7 @@ class HomeController(
         resizingItemId = null
         appearanceTarget = null
         closeFolder()
+        partitionPickerOpen = false
         drag.clear()
         measureJob?.cancel()
         measureResult = null

@@ -78,6 +78,9 @@ object LayoutEngine {
         return move(withPage, itemId, page.id, 0, 0)
     }
 
+    fun setPartition(ws: Workspace, pageId: Long, partition: Partition): Workspace =
+        ws.copy(pages = ws.pages.map { if (it.id == pageId) it.copy(partition = partition) else it })
+
     fun addPage(ws: Workspace, grid: GridSpec): Pair<Workspace, Page> {
         val order = (ws.pages.maxOfOrNull { it.order } ?: -1) + 1
         val page = Page(ws.nextPageId(), order, grid)

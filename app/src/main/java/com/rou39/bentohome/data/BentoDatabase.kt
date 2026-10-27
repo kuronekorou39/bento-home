@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         UsageSummaryEntity::class,
         FolderAppEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
     autoMigrations = [
         // v2: app_appearance を追加
@@ -29,6 +29,8 @@ import androidx.room.RoomDatabase
         AutoMigration(from = 4, to = 5),
         // v6: アプリの非表示と表示名（app_appearance.hidden・label）を追加
         AutoMigration(from = 5, to = 6),
+        // v7: ページの仕切り（workspace_page.partition）を追加
+        AutoMigration(from = 6, to = 7),
     ],
 )
 abstract class BentoDatabase : RoomDatabase() {

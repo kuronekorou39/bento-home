@@ -10,6 +10,7 @@ import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Page
+import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.layout.WorkspaceItem
 import com.rou39.bentohome.usage.AppUsage
@@ -39,9 +40,9 @@ data class BackupFile(
         const val FORMAT = "bento-home-backup"
         /**
          * v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。
-         * v4: アプリの非表示と表示名（BackupAppearance.hidden・label）。
+         * v4: アプリの非表示と表示名（BackupAppearance.hidden・label）。v5: ページの仕切り（BackupPage.partition）。
          */
-        const val SCHEMA_VERSION = 4
+        const val SCHEMA_VERSION = 5
     }
 }
 
@@ -65,7 +66,14 @@ data class BackupSettings(
 )
 
 @Serializable
-data class BackupPage(val id: Long, val order: Int, val baseColumns: Int, val baseRows: Int, val subdivisions: Int)
+data class BackupPage(
+    val id: Long,
+    val order: Int,
+    val baseColumns: Int,
+    val baseRows: Int,
+    val subdivisions: Int,
+    val partition: String = "NONE",
+)
 
 @Serializable
 data class BackupItem(
@@ -176,7 +184,7 @@ object BackupCodec {
             swipeDownNotifications = settings.swipeDownNotifications,
         ),
         pages = workspace.orderedPages.map {
-            BackupPage(it.id, it.order, it.grid.baseColumns, it.grid.baseRows, it.grid.subdivisions)
+            BackupPage(it.id, it.order, it.grid.baseColumns, it.grid.baseRows, it.grid.subdivisions, it.partition.name)
         },
         items = workspace.items.map { item ->
             val r = item.rect
@@ -215,7 +223,9 @@ object BackupCodec {
      * @param isInstalled この端末にアプリがあるか。無いアプリはホーム・ドックに置かない。
      */
     fun toRestorePlan(file: BackupFile, isInstalled: (AppRef) -> Boolean, defaults: LauncherSettings): RestorePlan {
-        val pages = file.pages.map { Page(it.id, it.order, GridSpec(it.baseColumns, it.baseRows, it.subdivisions)) }
+        val pages = file.pages.map {
+            Page(it.id, it.order, GridSpec(it.baseColumns, it.baseRows, it.subdivisions), Partition.fromName(it.partition))
+        }
         val pageIds = pages.map { it.id }.toSet()
         var skipped = 0
         var widgets = 0
