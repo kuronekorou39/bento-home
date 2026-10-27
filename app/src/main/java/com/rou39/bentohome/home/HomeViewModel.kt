@@ -57,6 +57,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val appearanceRepo = c.appearanceRepository
     private val usageRepo = c.usageRepository
     val selfMetrics = c.selfMetrics
+    val privileged = c.privileged
     val widgetMetrics = c.widgetMetrics
 
     val settings: StateFlow<LauncherSettings> =

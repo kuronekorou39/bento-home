@@ -133,6 +133,11 @@ class HomeController(
         drawerOpen = true
     }
 
+    fun openNotifications() {
+        backgroundMenuAt = null
+        NotificationPanel.expand(vm.getApplication(), vm.privileged, scope)
+    }
+
     fun openFolder(itemId: Long, rename: Boolean = false) {
         backgroundMenuAt = null
         openFolderId = itemId

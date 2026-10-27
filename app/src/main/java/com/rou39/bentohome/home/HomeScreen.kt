@@ -225,7 +225,11 @@ fun HomeScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
                     .onGloballyPositioned { geometry.gridArea = it.boundsInRoot() }
-                    .swipeUp(swipeThreshold) { controller.openDrawer() }
+                    .verticalSwipe(
+                        swipeThreshold,
+                        onSwipeUp = controller::openDrawer,
+                        onSwipeDown = if (settings.swipeDownNotifications) controller::openNotifications else null,
+                    )
                     // 背景の長押し・上スワイプは読み上げ中に使えないので、同じ操作を用意する
                     .semantics {
                         customActions = listOf(
@@ -235,6 +239,10 @@ fun HomeScreen(
                             },
                             CustomAccessibilityAction("すべてのアプリ") {
                                 controller.openDrawer()
+                                true
+                            },
+                            CustomAccessibilityAction("通知を開く") {
+                                controller.openNotifications()
                                 true
                             },
                         )
@@ -380,13 +388,19 @@ fun HomeScreen(
     }
 }
 
-private fun Modifier.swipeUp(threshold: Float, onSwipeUp: () -> Unit): Modifier =
+/** 背景の縦スワイプ。上でアプリ一覧、下で通知パネル（onSwipeDown が null なら何もしない）。 */
+private fun Modifier.verticalSwipe(threshold: Float, onSwipeUp: () -> Unit, onSwipeDown: (() -> Unit)?): Modifier =
     this.then(
-        Modifier.pointerInput(Unit) {
+        Modifier.pointerInput(onSwipeDown != null) {
             var total = 0f
             detectVerticalDragGestures(
                 onDragStart = { total = 0f },
-                onDragEnd = { if (total < -threshold) onSwipeUp() },
+                onDragEnd = {
+                    when {
+                        total < -threshold -> onSwipeUp()
+                        total > threshold -> onSwipeDown?.invoke()
+                    }
+                },
                 onVerticalDrag = { change, dy ->
                     change.consume()
                     total += dy

@@ -61,6 +61,7 @@ data class BackupSettings(
     val grayOnHome: Boolean,
     val grayInDrawer: Boolean,
     val grayDays: Int,
+    val swipeDownNotifications: Boolean = true,
 )
 
 @Serializable
@@ -172,6 +173,7 @@ object BackupCodec {
             grayOnHome = settings.grayOnHome,
             grayInDrawer = settings.grayInDrawer,
             grayDays = settings.grayDays,
+            swipeDownNotifications = settings.swipeDownNotifications,
         ),
         pages = workspace.orderedPages.map {
             BackupPage(it.id, it.order, it.grid.baseColumns, it.grid.baseRows, it.grid.subdivisions)
@@ -276,6 +278,7 @@ object BackupCodec {
             grayOnHome = s.grayOnHome,
             grayInDrawer = s.grayInDrawer,
             grayDays = s.grayDays,
+            swipeDownNotifications = s.swipeDownNotifications,
         )
         val appearances = file.appearances.associate {
             AppRef(it.component, it.profileSerial) to AppAppearance(

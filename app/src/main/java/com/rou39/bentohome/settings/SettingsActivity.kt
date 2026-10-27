@@ -149,6 +149,9 @@ class SettingsActivity : ComponentActivity() {
                             update { it.copy(layoutLocked = v) }
                         }
                         SwitchRow("ドックを表示", s.dockVisible) { v -> update { it.copy(dockVisible = v) } }
+                        SwitchRow("背景を下にスワイプして通知を開く", s.swipeDownNotifications) { v ->
+                            update { it.copy(swipeDownNotifications = v) }
+                        }
 
                         HorizontalDivider()
                         Section("アイコン")

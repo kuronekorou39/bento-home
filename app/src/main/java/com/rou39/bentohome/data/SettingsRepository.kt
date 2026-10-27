@@ -53,6 +53,8 @@ data class LauncherSettings(
     val grayOnHome: Boolean = true,
     val grayInDrawer: Boolean = true,
     val grayDays: Int = 30,
+    /** ホームの背景を下にスワイプして通知パネルを開く（plan.md §10）。 */
+    val swipeDownNotifications: Boolean = true,
 ) {
     companion object {
         const val SUBDIVISIONS = 2
@@ -82,6 +84,7 @@ class SettingsRepository(private val context: Context) {
         val grayOnHome = booleanPreferencesKey("gray_on_home")
         val grayInDrawer = booleanPreferencesKey("gray_in_drawer")
         val grayDays = intPreferencesKey("gray_days")
+        val swipeDownNotifications = booleanPreferencesKey("swipe_down_notifications")
     }
 
     val settings: Flow<LauncherSettings> = context.settingsStore.data.map(::read)
@@ -103,6 +106,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.grayOnHome] = s.grayOnHome
             p[Keys.grayInDrawer] = s.grayInDrawer
             p[Keys.grayDays] = s.grayDays
+            p[Keys.swipeDownNotifications] = s.swipeDownNotifications
         }
     }
 
@@ -125,6 +129,7 @@ class SettingsRepository(private val context: Context) {
             grayOnHome = p[Keys.grayOnHome] ?: d.grayOnHome,
             grayInDrawer = p[Keys.grayInDrawer] ?: d.grayInDrawer,
             grayDays = p[Keys.grayDays] ?: d.grayDays,
+            swipeDownNotifications = p[Keys.swipeDownNotifications] ?: d.swipeDownNotifications,
         )
     }
 

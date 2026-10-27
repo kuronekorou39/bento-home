@@ -194,6 +194,7 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
         const val ICON_PX = 96
         val PURPOSES = mapOf(
             Manifest.permission.REQUEST_DELETE_PACKAGES to "長押しメニューの「アンインストール」で OS の確認画面を開くため",
+            Manifest.permission.EXPAND_STATUS_BAR to "ホームの背景を下にスワイプして通知パネルを開くため",
             Manifest.permission.PACKAGE_USAGE_STATS to "アプリごとの使用時間・通信量・容量を表示するため",
             Manifest.permission.DUMP to "温度センサーの値を読むため。adb で付与する",
             Manifest.permission.QUERY_ALL_PACKAGES to "プロセスの持ち主をアプリ名で表示するため",
