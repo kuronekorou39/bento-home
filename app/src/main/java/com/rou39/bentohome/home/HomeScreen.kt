@@ -110,6 +110,9 @@ private val DOCK_HEIGHT = 88.dp
 /** 画面端でこの時間止まると、ドラッグ中にページを送る。 */
 private const val EDGE_FLIP_DELAY_MS = 600L
 
+/** 画面の大きさが分かる前に使う、ページの横÷縦。 */
+private const val DEFAULT_PAGE_ASPECT = 0.6f
+
 private val OK_COLOR = Color(0x5534C759)
 private val NG_COLOR = Color(0x55FF3B30)
 
@@ -207,6 +210,8 @@ fun HomeScreen(
     // ホームでの戻る操作は何もしない。開いているものだけ閉じる。
     BackHandler(enabled = true) {}
     BackHandler(enabled = controller.drawerOpen) { controller.drawerOpen = false }
+    BackHandler(enabled = controller.selectedApps.isNotEmpty()) { controller.clearSelection() }
+    BackHandler(enabled = controller.overviewOpen) { controller.overviewOpen = false }
     BackHandler(enabled = controller.backgroundMenuAt != null) { controller.backgroundMenuAt = null }
     BackHandler(enabled = controller.resizingItemId != null) { controller.resizingItemId = null }
     BackHandler(enabled = controller.openFolderId != null) { controller.closeFolder() }
@@ -303,6 +308,7 @@ fun HomeScreen(
                 controller = controller,
                 apps = apps,
                 hidden = remember(appearances) { appearances.filterValues { it.hidden }.keys },
+                multiPage = pages.size >= 2,
                 badgeFor = badgeFor,
                 grayFor = drawerGrayFor,
                 sort = settings.drawerSort,
@@ -313,6 +319,23 @@ fun HomeScreen(
                 },
                 // ドラッグ中は透明にするだけで残す。外すと指の操作が途切れる。
                 modifier = Modifier.alpha(if (drag.fromDrawer) 0f else 1f),
+            )
+        }
+
+        if (controller.overviewOpen && controller.drawerOpen) {
+            val area = geometry.gridArea
+            HomeOverview(
+                controller = controller,
+                workspace = workspace,
+                byRef = byRef,
+                count = controller.selectedApps.size,
+                aspect = if (area.height > 0f) area.width / area.height else DEFAULT_PAGE_ASPECT,
+                onPick = { pageIndex ->
+                    vm.addAppsToPage(controller.selectedApps.toList(), pageIndex)
+                    controller.clearSelection()
+                    controller.drawerOpen = false
+                },
+                onDismiss = { controller.overviewOpen = false },
             )
         }
 

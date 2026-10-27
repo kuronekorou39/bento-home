@@ -3,12 +3,14 @@ package com.rou39.bentohome.home
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.data.IconShape
+import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.monitor.SelfCounters
@@ -42,6 +44,25 @@ class HomeController(
 
     /** リサイズ中のウィジェット項目。null ならリサイズしていない。 */
     var resizingItemId by mutableStateOf<Long?>(null)
+
+    /** 一覧で選んでいるアプリ（選んだ順、plan.md §10）。ホームが2ページ以上のときだけ使う。 */
+    val selectedApps = mutableStateListOf<AppRef>()
+
+    /** 選択中に「その他」でメニューを開いたアプリ。 */
+    var drawerMenuRef by mutableStateOf<AppRef?>(null)
+
+    /** 選んだアプリを置くページを選ぶ、ホームの縮小表示。 */
+    var overviewOpen by mutableStateOf(false)
+
+    fun toggleSelected(app: AppRef) {
+        if (!selectedApps.remove(app)) selectedApps += app
+    }
+
+    fun clearSelection() {
+        selectedApps.clear()
+        drawerMenuRef = null
+        overviewOpen = false
+    }
 
     /** 仕切りを選ぶダイアログを開いているか。 */
     var partitionPickerOpen by mutableStateOf(false)
@@ -86,6 +107,7 @@ class HomeController(
         appearanceTarget = null
         closeFolder()
         partitionPickerOpen = false
+        clearSelection()
         drag.clear()
         measureJob?.cancel()
         measureResult = null

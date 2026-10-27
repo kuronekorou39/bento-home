@@ -78,6 +78,33 @@ object LayoutEngine {
         return move(withPage, itemId, page.id, 0, 0)
     }
 
+    /**
+     * アプリをまとめてホームに置く（plan.md §10、一覧の複数選択）。
+     * 指定したページから順に後ろのページの空きへ置き、どこにも無ければ末尾にページを足す。前のページには戻らない。
+     * startPageId が null なら、末尾に新しいページを足してそこから置く。
+     * @return 新しい配置と、置いた項目の ID（アプリの順）
+     */
+    fun placeApps(ws: Workspace, apps: List<AppRef>, startPageId: Long?, grid: GridSpec): Pair<Workspace, List<Long>> {
+        var current = ws
+        val start = startPageId ?: addPage(current, grid).let { (w, page) -> current = w; page.id }
+        val ids = mutableListOf<Long>()
+        for (app in apps) {
+            val ordered = current.orderedPages
+            val later = ordered.dropWhile { it.id != start }
+            val found = later.firstNotNullOfOrNull { page ->
+                firstFreeCell(current, page.id, grid.iconSpan, grid.iconSpan, grid.subdivisions)?.let { page.id to it }
+            }
+            val (pageId, rect) = found ?: addPage(current, grid).let { (w, page) ->
+                current = w
+                page.id to CellRect(0, 0, grid.iconSpan, grid.iconSpan)
+            }
+            val item = WorkspaceItem(current.nextItemId(), pageId, rect, ItemContent.App(app))
+            current = (add(current, item) as Placement.Ok).workspace
+            ids += item.id
+        }
+        return current to ids
+    }
+
     fun setPartition(ws: Workspace, pageId: Long, partition: Partition): Workspace =
         ws.copy(pages = ws.pages.map { if (it.id == pageId) it.copy(partition = partition) else it })
 

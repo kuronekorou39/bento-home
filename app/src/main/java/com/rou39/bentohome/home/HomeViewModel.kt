@@ -267,6 +267,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         commit(next, message = "ホームに追加しました", focusItemId = itemId)
     }
 
+    /**
+     * 一覧で選んだアプリを、ホームの縮小表示で選んだページに置く（plan.md §10）。
+     * pageIndex が null なら新しいページ。入りきらない分は後ろのページへ置く。
+     */
+    fun addAppsToPage(apps: List<AppRef>, pageIndex: Int?) {
+        val ws = _workspace.value ?: return
+        if (apps.isEmpty()) return
+        val start = pageIndex?.let { ws.pageAt(it)?.id }
+        val (next, ids) = LayoutEngine.placeApps(ws, apps, start, gridOf(ws))
+        val pages = ids.mapNotNull { next.item(it)?.pageId }.distinct()
+        val order = next.orderedPages.map { it.id }
+        val first = order.indexOf(pages.first()) + 1
+        val message = buildString {
+            append("${apps.size}個をホームの${first}ページ目に追加しました")
+            if (pages.size > 1) append("（入りきらない分は後ろのページ）")
+        }
+        commit(next, message = message, focusItemId = ids.first())
+    }
+
     fun placeNewWidget(widgetId: Int, info: AppWidgetProviderInfo) {
         val ws = _workspace.value ?: return
         val (spanX, spanY) = widgetSpans(info, gridOf(ws))

@@ -45,6 +45,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.data.DrawerSort
@@ -53,6 +62,7 @@ import com.rou39.bentohome.usage.RankInput
 import com.rou39.bentohome.usage.UsagePolicy
 
 private val DRAWER_ICON_SIZE = 52.dp
+private val SELECTED_COLOR = Color.White.copy(alpha = 0.16f)
 private const val HIDDEN_ALPHA = 0.45f
 
 /**
@@ -66,6 +76,11 @@ fun AppDrawer(
     apps: List<AppEntry>,
     /** アプリ一覧に出さないアプリ（plan.md §10）。下のボタンで一時的に表示できる。 */
     hidden: Set<AppRef>,
+    /**
+     * ホームが2ページ以上か。そのときは長押しでつままずに選択し、まとめて「ホームに追加」する（plan.md §10）。
+     * 運びながらページ送りを待たなくて済むように。
+     */
+    multiPage: Boolean,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
     grayFor: (AppEntry?) -> GrayReason?,
     sort: DrawerSort,
@@ -73,6 +88,9 @@ fun AppDrawer(
     modifier: Modifier = Modifier,
 ) {
     val query = controller.query
+    val selectMode = multiPage && !controller.locked
+    // 一覧を閉じたら選択を捨てる
+    DisposableEffect(Unit) { onDispose { controller.clearSelection() } }
     var showHidden by remember { mutableStateOf(false) }
     val hiddenCount = apps.count { it.ref in hidden }
     val listed = remember(apps, hidden, showHidden) { if (showHidden) apps else apps.filter { it.ref !in hidden } }
@@ -177,10 +195,15 @@ fun AppDrawer(
         }
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize().nestedScroll(pullToClose),
+            modifier = Modifier.weight(1f).fillMaxWidth().nestedScroll(pullToClose),
         ) {
             items(filtered, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
-                DrawerTile(controller, entry, badgeFor(entry), grayFor(entry), isHidden = entry.ref in hidden)
+                DrawerTile(
+                    controller, entry, badgeFor(entry), grayFor(entry),
+                    isHidden = entry.ref in hidden,
+                    selectMode = selectMode,
+                    selected = entry.ref in controller.selectedApps,
+                )
             }
             if (hiddenCount > 0) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -190,6 +213,7 @@ fun AppDrawer(
                 }
             }
         }
+        if (controller.selectedApps.isNotEmpty()) SelectionBar(controller)
     }
 }
 
@@ -200,9 +224,14 @@ private fun DrawerTile(
     badge: BadgeDisplay?,
     gray: GrayReason?,
     isHidden: Boolean,
+    selectMode: Boolean,
+    selected: Boolean,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
+    // 選択中は「その他」からメニューを開く
+    LaunchedEffect(controller.drawerMenuRef) { if (controller.drawerMenuRef == entry.ref) menuOpen = true }
+    val selecting = controller.selectedApps.isNotEmpty()
     val span = controller.vm.currentGrid().iconSpan
     val style = controller.style
     Box(
@@ -212,6 +241,10 @@ private fun DrawerTile(
             .height(100.dp)
             // 一時的に表示している非表示のアプリは薄くする
             .alpha(if (isHidden) HIDDEN_ALPHA else 1f)
+            .padding(2.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (selected) SELECTED_COLOR else Color.Transparent)
+            .semantics { if (selectMode) stateDescription = if (selected) "選択中" else "未選択" }
             .launcherItemGestures(
                 entry.ref,
                 controller.itemCallbacks(
@@ -220,10 +253,15 @@ private fun DrawerTile(
                     spanX = span,
                     spanY = span,
                     entry = entry,
-                    canDrag = true,
-                    onLongPress = { menuOpen = true },
+                    canDrag = !selectMode,
+                    onLongPress = { if (selectMode) controller.toggleSelected(entry.ref) else menuOpen = true },
                     onDragStarted = { menuOpen = false },
                     fromDrawer = true,
+                    onTap = if (selecting) {
+                        { _ -> controller.toggleSelected(entry.ref) }
+                    } else {
+                        null
+                    },
                 ),
             ),
     ) {
@@ -233,8 +271,25 @@ private fun DrawerTile(
             modifier = Modifier.padding(horizontal = 4.dp),
             gray = gray != null,
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            if (!controller.locked) {
+        if (selected) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            ) { Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp) }
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = {
+                menuOpen = false
+                controller.drawerMenuRef = null
+            },
+        ) {
+            if (!controller.locked && !selectMode) {
                 DropdownMenuItem(text = { Text("ホームに追加") }, onClick = {
                     menuOpen = false
                     controller.vm.addAppToHome(entry.ref)
@@ -242,5 +297,24 @@ private fun DrawerTile(
             }
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
         }
+    }
+}
+
+/** 選択中の操作。件数・取り消し・（1個なら）その他・ホームに追加。 */
+@Composable
+private fun SelectionBar(controller: HomeController) {
+    val count = controller.selectedApps.size
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF26262C))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text("${count}個を選択中", color = Color.White, modifier = Modifier.weight(1f))
+        TextButton(onClick = controller::clearSelection) { Text("キャンセル") }
+        if (count == 1) TextButton(onClick = { controller.drawerMenuRef = controller.selectedApps.single() }) { Text("その他") }
+        Button(onClick = { controller.overviewOpen = true }) { Text("ホームに追加") }
     }
 }
