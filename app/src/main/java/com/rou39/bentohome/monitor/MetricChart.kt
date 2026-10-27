@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -160,28 +161,59 @@ fun MetricChart(
                 val text = measurer.measure(format(v), labelStyle)
                 drawText(text, topLeft = Offset(0f, (yy - text.size.height / 2f).coerceIn(0f, size.height - text.size.height)))
             }
-            visible.forEachIndexed { i, s ->
-                val path = Path()
-                var prev: Point? = null
-                for (p in s.points) {
-                    val px = x(p.t).coerceAtLeast(plotLeft)
-                    if (prev == null || p.t - prev.t > GAP_MS) path.moveTo(px, y(p.v)) else path.lineTo(px, y(p.v))
-                    prev = p
-                }
-                drawPath(
-                    path,
-                    colors[i % colors.size],
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                )
-                // 点が1つしか無いときも見えるように最新点に印を付ける
-                s.points.lastOrNull()?.let { drawCircle(colors[i % colors.size], 3.dp.toPx(), Offset(x(it.t), y(it.v))) }
-            }
+            drawLines(visible, colors, plotLeft, ::x, ::y)
             scrubT?.let { t ->
                 val xx = x(t).coerceIn(plotLeft, size.width)
                 drawLine(muted, Offset(xx, 0f), Offset(xx, size.height), strokeWidth = 1.dp.toPx())
             }
         }
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = muted) }
+    }
+}
+
+/**
+ * 数値カードに添える小さいグラフ。軸・凡例・なぞりは無く、線の形だけを見せる。
+ * 値の読み上げはカードの側でまとめて行うので、ここには意味を付けない。
+ */
+@Composable
+fun Sparkline(series: List<ChartSeries>, now: Long, windowMs: Long, yRange: YRange, modifier: Modifier = Modifier) {
+    val colors = seriesColors()
+    val start = now - windowMs
+    val visible = series.map { s -> s.copy(points = s.points.filter { it.t >= start - GAP_MS }) }
+    val (yMin, yMax) = range(yRange, visible.flatMap { s -> s.points.filter { it.t >= start }.map { it.v } })
+    Canvas(modifier.fillMaxWidth().height(32.dp)) {
+        // 線の太さの分だけ上下に余白を取り、端の値が切れないようにする
+        val inset = 3.dp.toPx()
+        val plotH = size.height - inset * 2
+        fun x(t: Long) = (t - start).toFloat() / windowMs * size.width
+        fun y(v: Float) = inset + plotH - (v - yMin) / (yMax - yMin) * plotH
+        drawLines(visible, colors, 0f, ::x, ::y)
+    }
+}
+
+/** 系列ごとの折れ線。[GAP_MS] より間が空いたところは線を切る。 */
+private fun DrawScope.drawLines(
+    visible: List<ChartSeries>,
+    colors: List<Color>,
+    left: Float,
+    x: (Long) -> Float,
+    y: (Float) -> Float,
+) {
+    visible.forEachIndexed { i, s ->
+        val path = Path()
+        var prev: Point? = null
+        for (p in s.points) {
+            val px = x(p.t).coerceAtLeast(left)
+            if (prev == null || p.t - prev.t > GAP_MS) path.moveTo(px, y(p.v)) else path.lineTo(px, y(p.v))
+            prev = p
+        }
+        drawPath(
+            path,
+            colors[i % colors.size],
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+        )
+        // 点が1つしか無いときも見えるように最新点に印を付ける
+        s.points.lastOrNull()?.let { drawCircle(colors[i % colors.size], 3.dp.toPx(), Offset(x(it.t), y(it.v))) }
     }
 }
 

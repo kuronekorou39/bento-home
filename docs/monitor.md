@@ -41,7 +41,8 @@ Android 17 は、他のアプリのプロセスをアプリから見せない。
 | `AppRows` | プロセス・uid・パッケージをアプリ単位にまとめる（単体テスト対象） |
 | `SelfMetrics` | Bento 自身の CPU 時間と、ホームの描画フレーム数（`OnFrameMetricsAvailableListener`） |
 | `WidgetMetrics` | ウィジェットごとの更新回数と計測結果。`AppWidgetHost.onCreateView` で更新を数える View に差し替える |
-| `MonitorActivity`・`MetricChart` | 画面（概要・アプリ・棚卸し・ウィジェット・Bento の5タブ）と折れ線グラフ |
+| `MonitorActivity`・`MonitorUi` | 画面（概要・アプリ・棚卸し・ウィジェット・Bento の5タブ）と、タブ共通の見出し・面 |
+| `OverviewTab`・`MetricChart` | 概要。値ごとの数値カード（小さいグラフ付き）を並べ、押したカードの大きい折れ線グラフを下に出す |
 | `Inventory`・`InventoryTab`・`InventoryParsing` | 棚卸し（docs/stage6-notes.md §8）。電池と権限の使用は計測用プロセスの出力を読む（単体テスト対象） |
 
 ### 読み取りの間隔

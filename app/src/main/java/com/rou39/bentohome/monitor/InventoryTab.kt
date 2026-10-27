@@ -67,7 +67,7 @@ fun InventoryTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
     }
     val now = state.loadedAt
 
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    LazyColumn(contentPadding = PaddingValues(TAB_PADDING), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 InventorySort.entries.forEach { option ->
@@ -94,9 +94,9 @@ fun InventoryTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
                     InventorySort.STORAGE -> add("アプリ本体・データ・キャッシュの合計")
                 }
             }
-            notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 2.dp)) }
+            NoteBox(notes, Modifier.padding(vertical = 4.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("${rows.size}個", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Small("${rows.size}個", Modifier.weight(1f))
                 TextButton(onClick = vm::loadInventory, enabled = !state.loading) { Text("読み直す") }
             }
         }
