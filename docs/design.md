@@ -222,7 +222,7 @@ firstFreeCell(ws, pageId, spanX, spanY) : Cell?  // ウィジェット追加・�
 
 `exportSchema = true` でスキーマ JSON（`app/schemas/`）をリポジトリに入れ、マイグレーションテストの基準にする。
 
-- v1 は `workspace_page`、`workspace_item`、`dock_item` の3表。v2 で `app_appearance`（keepColor・excludeFromRanking・badgeMode）を自動マイグレーションで足した。`usage_daily`・`usage_summary` は段階4で足した（v3）。v4 でフォルダー用に `workspace_item.title` と `folder_app`（itemId・position・component・profileSerial）を足した。v5 でショートカット用に `workspace_item.shortcutId` を足した。
+- v1 は `workspace_page`、`workspace_item`、`dock_item` の3表。v2 で `app_appearance`（keepColor・excludeFromRanking・badgeMode）を自動マイグレーションで足した。`usage_daily`・`usage_summary` は段階4で足した（v3）。v4 でフォルダー用に `workspace_item.title` と `folder_app`（itemId・position・component・profileSerial）を足した。v5 でショートカット用に `workspace_item.shortcutId` を足した。v6 でアプリの非表示と表示名（`app_appearance.hidden`・`label`）を足した。
 - `app_appearance` は plan.md の iconOverride・labelOverride を持たない。アイコンの差し替えは段階6の拡張で検討する。
 - マイグレーションの instrumented テストは、実機の配置を消さないよう保留している。`connectedAndroidTest` は終了時にアプリを削除するため。エミュレーターを用意したら追加する。
 - plan.md の `pinned` 列は使い道が無いので持たない。ページの表示順の列名は、SQL の予約語を避けて `position` とする。

@@ -9,6 +9,10 @@ data class AppAppearance(
     val excludeFromRanking: Boolean = false,
     /** null なら全体の設定に従う。 */
     val badgeMode: BadgeMode? = null,
+    /** アプリ一覧に出さない（plan.md §10）。 */
+    val hidden: Boolean = false,
+    /** 表示名。null なら元の名前。 */
+    val label: String? = null,
 ) {
     val isDefault: Boolean get() = this == AppAppearance()
 }
@@ -20,6 +24,8 @@ class AppearanceRepository(private val dao: AppearanceDao) {
                 keepColor = e.keepColor,
                 excludeFromRanking = e.excludeFromRanking,
                 badgeMode = e.badgeMode?.let { runCatching { BadgeMode.valueOf(it) }.getOrNull() },
+                hidden = e.hidden,
+                label = e.label,
             )
         }
     }
@@ -34,21 +40,15 @@ class AppearanceRepository(private val dao: AppearanceDao) {
         keepColor = a.keepColor,
         excludeFromRanking = a.excludeFromRanking,
         badgeMode = a.badgeMode?.name,
+        hidden = a.hidden,
+        label = a.label,
     )
 
     suspend fun set(app: AppRef, appearance: AppAppearance) {
         if (appearance.isDefault) {
             dao.delete(app.component, app.profileSerial)
         } else {
-            dao.upsert(
-                AppAppearanceEntity(
-                    component = app.component,
-                    profileSerial = app.profileSerial,
-                    keepColor = appearance.keepColor,
-                    excludeFromRanking = appearance.excludeFromRanking,
-                    badgeMode = appearance.badgeMode?.name,
-                ),
-            )
+            dao.upsert(toEntity(app, appearance))
         }
     }
 }

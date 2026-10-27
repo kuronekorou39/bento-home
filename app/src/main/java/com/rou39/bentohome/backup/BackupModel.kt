@@ -37,8 +37,11 @@ data class BackupFile(
 ) {
     companion object {
         const val FORMAT = "bento-home-backup"
-        /** v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。 */
-        const val SCHEMA_VERSION = 3
+        /**
+         * v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。
+         * v4: アプリの非表示と表示名（BackupAppearance.hidden・label）。
+         */
+        const val SCHEMA_VERSION = 4
     }
 }
 
@@ -102,6 +105,8 @@ data class BackupAppearance(
     val keepColor: Boolean,
     val excludeFromRanking: Boolean,
     val badgeMode: String? = null,
+    val hidden: Boolean = false,
+    val label: String? = null,
 )
 
 @Serializable
@@ -194,7 +199,9 @@ object BackupCodec {
         },
         dock = workspace.dock.map { BackupDock(it.slot, it.app.component, it.app.profileSerial) },
         appearances = appearances.map { (ref, a) ->
-            BackupAppearance(ref.component, ref.profileSerial, a.keepColor, a.excludeFromRanking, a.badgeMode?.name)
+            BackupAppearance(
+                ref.component, ref.profileSerial, a.keepColor, a.excludeFromRanking, a.badgeMode?.name, a.hidden, a.label,
+            )
         },
         usage = usage?.map { (ref, u) ->
             BackupUsage(ref.component, ref.profileSerial, u.observedSince, u.lastLaunchAt, u.daily)
@@ -272,7 +279,7 @@ object BackupCodec {
         )
         val appearances = file.appearances.associate {
             AppRef(it.component, it.profileSerial) to AppAppearance(
-                it.keepColor, it.excludeFromRanking, it.badgeMode?.let { m -> enumOrNull<BadgeMode>(m) },
+                it.keepColor, it.excludeFromRanking, it.badgeMode?.let { m -> enumOrNull<BadgeMode>(m) }, it.hidden, it.label,
             )
         }
         val usage = file.usage?.associate {

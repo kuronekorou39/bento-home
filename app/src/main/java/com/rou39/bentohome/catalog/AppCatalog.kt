@@ -31,6 +31,8 @@ data class AppEntry(
     val label: String,
     val user: UserHandle,
     val info: LauncherActivityInfo,
+    /** アプリが付けた名前。label は表示名を設定していればそちら（plan.md §10）。 */
+    val originalLabel: String = label,
 ) {
     val packageName: String get() = component.packageName
 

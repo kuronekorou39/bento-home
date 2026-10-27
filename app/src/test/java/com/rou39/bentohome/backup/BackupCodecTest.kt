@@ -123,4 +123,15 @@ class BackupCodecTest {
         assertEquals(ItemContent.Shortcut("com.chat", "web-1", 0, "ページ"), plan.workspace.item(20)!!.content)
         assertNull(plan.workspace.item(21))
     }
+
+    @Test
+    fun hiddenAndLabelRoundTrip() {
+        val ap = mapOf(chat to AppAppearance(hidden = true, label = "連絡"))
+        val file = BackupCodec.decode(
+            BackupCodec.encode(BackupCodec.fromState(workspace, settings, ap, null, exportedAt = 1, appVersion = "x")),
+        )
+        val plan = BackupCodec.toRestorePlan(file, { true }, LauncherSettings())
+        assertEquals(AppAppearance(hidden = true, label = "連絡"), plan.appearances[chat])
+        assertFalse(AppAppearance(hidden = true).isDefault)
+    }
 }

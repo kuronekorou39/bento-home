@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -62,6 +64,15 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     val appearances: StateFlow<Map<AppRef, AppAppearance>> =
         appearanceRepo.appearances.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    /** 表示名を反映したアプリ（plan.md §10）。名前順。非表示のアプリも含む。 */
+    val displayApps: StateFlow<List<AppEntry>> = combine(catalog.apps, appearances) { list, ap ->
+        list.map { e -> ap[e.ref]?.label?.let { e.copy(label = it) } ?: e }.sortedBy { it.label.lowercase() }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val displayByRef: StateFlow<Map<AppRef, AppEntry>> = displayApps
+        .map { list -> list.associateBy { it.ref } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     val usage: StateFlow<Map<AppRef, AppUsage>> =
         usageRepo.usage.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())

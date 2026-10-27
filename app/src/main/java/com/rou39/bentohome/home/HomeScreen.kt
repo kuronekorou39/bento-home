@@ -127,8 +127,8 @@ fun HomeScreen(
     val ws by vm.workspace.collectAsState()
     val settings by vm.settings.collectAsState()
     val appearances by vm.appearances.collectAsState()
-    val apps by vm.catalog.apps.collectAsState()
-    val byRef by vm.catalog.byRef.collectAsState()
+    val apps by vm.displayApps.collectAsState()
+    val byRef by vm.displayByRef.collectAsState()
     val badgeState by BadgeRepository.state.collectAsState()
     val undo by vm.undo.collectAsState()
     val usage by vm.usage.collectAsState()
@@ -293,6 +293,7 @@ fun HomeScreen(
             AppDrawer(
                 controller = controller,
                 apps = apps,
+                hidden = remember(appearances) { appearances.filterValues { it.hidden }.keys },
                 badgeFor = badgeFor,
                 grayFor = drawerGrayFor,
                 sort = settings.drawerSort,

@@ -1,5 +1,6 @@
 package com.rou39.bentohome.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -91,6 +92,10 @@ data class AppAppearanceEntity(
     val excludeFromRanking: Boolean,
     /** null なら全体の設定に従う。BadgeMode の名前。 */
     val badgeMode: String?,
+    /** アプリ一覧に出さない（v6、plan.md §10）。ホーム・ドック・フォルダーに置いたものはそのまま。 */
+    @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
+    /** 表示名（v6）。null なら元の名前。 */
+    val label: String? = null,
 )
 
 /** このランチャーからの日別起動回数（plan.md §4）。最大60日分。 */

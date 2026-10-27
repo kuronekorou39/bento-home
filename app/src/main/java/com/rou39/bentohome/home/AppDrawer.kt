@@ -43,13 +43,17 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.ui.draw.alpha
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.data.DrawerSort
 import com.rou39.bentohome.usage.GrayReason
 import com.rou39.bentohome.usage.RankInput
 import com.rou39.bentohome.usage.UsagePolicy
 
 private val DRAWER_ICON_SIZE = 52.dp
+private const val HIDDEN_ALPHA = 0.45f
 
 /**
  * アプリ一覧（docs/design.md §13）。検索は一覧の中だけで使い、自動でフォーカスしない。
@@ -60,6 +64,8 @@ private val DRAWER_ICON_SIZE = 52.dp
 fun AppDrawer(
     controller: HomeController,
     apps: List<AppEntry>,
+    /** アプリ一覧に出さないアプリ（plan.md §10）。下のボタンで一時的に表示できる。 */
+    hidden: Set<AppRef>,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
     grayFor: (AppEntry?) -> GrayReason?,
     sort: DrawerSort,
@@ -67,22 +73,33 @@ fun AppDrawer(
     modifier: Modifier = Modifier,
 ) {
     val query = controller.query
+    var showHidden by remember { mutableStateOf(false) }
+    val hiddenCount = apps.count { it.ref in hidden }
+    val listed = remember(apps, hidden, showHidden) { if (showHidden) apps else apps.filter { it.ref !in hidden } }
     // remember の計算は並び順を切り替えたときだけ走る。その時点の使用記録で順番を決める
     val frozenOrder = remember(sort) {
         when (sort) {
-            DrawerSort.NAME -> apps.map { it.ref }
-            DrawerSort.FREQUENT -> UsagePolicy.sortByFrequency(rankInputs(apps), controller.vm.today())
-            DrawerSort.RECENT -> UsagePolicy.sortByRecent(rankInputs(apps))
+            DrawerSort.NAME -> listed.map { it.ref }
+            DrawerSort.FREQUENT -> UsagePolicy.sortByFrequency(rankInputs(listed), controller.vm.today())
+            DrawerSort.RECENT -> UsagePolicy.sortByRecent(rankInputs(listed))
         }
     }
-    val ordered = remember(frozenOrder, apps) {
-        val byRef = apps.associateBy { it.ref }
+    val ordered = remember(frozenOrder, listed) {
+        val byRef = listed.associateBy { it.ref }
         val known = frozenOrder.toHashSet()
-        frozenOrder.mapNotNull(byRef::get) + apps.filter { it.ref !in known }
+        frozenOrder.mapNotNull(byRef::get) + listed.filter { it.ref !in known }
     }
+    // 表示名と元の名前のどちらでも見つかるようにする
     val filtered = remember(ordered, query) {
         val q = query.trim()
-        if (q.isEmpty()) ordered else ordered.filter { it.label.contains(q, ignoreCase = true) || it.packageName.contains(q, ignoreCase = true) }
+        if (q.isEmpty()) {
+            ordered
+        } else {
+            ordered.filter {
+                it.label.contains(q, ignoreCase = true) || it.originalLabel.contains(q, ignoreCase = true) ||
+                    it.packageName.contains(q, ignoreCase = true)
+            }
+        }
     }
     val closeThreshold = with(LocalDensity.current) { 96.dp.toPx() }
     // 一覧の先頭でさらに下へ引くと閉じる
@@ -163,14 +180,27 @@ fun AppDrawer(
             modifier = Modifier.fillMaxSize().nestedScroll(pullToClose),
         ) {
             items(filtered, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
-                DrawerTile(controller, entry, badgeFor(entry), grayFor(entry))
+                DrawerTile(controller, entry, badgeFor(entry), grayFor(entry), isHidden = entry.ref in hidden)
+            }
+            if (hiddenCount > 0) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    TextButton(onClick = { showHidden = !showHidden }, modifier = Modifier.padding(8.dp)) {
+                        Text(if (showHidden) "非表示のアプリを隠す" else "非表示のアプリ ${hiddenCount}個を表示")
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: BadgeDisplay?, gray: GrayReason?) {
+private fun DrawerTile(
+    controller: HomeController,
+    entry: AppEntry,
+    badge: BadgeDisplay?,
+    gray: GrayReason?,
+    isHidden: Boolean,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
     val span = controller.vm.currentGrid().iconSpan
@@ -180,6 +210,8 @@ private fun DrawerTile(controller: HomeController, entry: AppEntry, badge: Badge
         modifier = Modifier
             .fillMaxWidth()
             .height(100.dp)
+            // 一時的に表示している非表示のアプリは薄くする
+            .alpha(if (isHidden) HIDDEN_ALPHA else 1f)
             .launcherItemGestures(
                 entry.ref,
                 controller.itemCallbacks(
