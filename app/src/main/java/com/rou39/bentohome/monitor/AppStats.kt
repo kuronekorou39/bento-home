@@ -56,6 +56,36 @@ class AppStats(private val context: Context) {
         return DailyAppStats(fg, bytes)
     }
 
+    /** OS の使用記録で、パッケージごとに最後に画面に出た時刻（棚卸し、plan.md §10）。重いので IO スレッドで呼ぶ。 */
+    fun lastUsed(sinceMs: Long): Map<String, Long> = runCatching {
+        usage.queryAndAggregateUsageStats(sinceMs, System.currentTimeMillis())
+            .mapValues { maxOf(it.value.lastTimeVisible, it.value.lastTimeUsed) }
+            .filterValues { it > 0 }
+    }.onFailure { Log.w(TAG, "last used", it) }.getOrDefault(emptyMap())
+
+    /**
+     * uid ごとの通信量（Wi-Fi とモバイルの合計）。second は画面に出ていないとき（STATE_DEFAULT）の分。
+     * 重いので IO スレッドで呼ぶ。
+     */
+    fun networkByUid(startMs: Long, endMs: Long): Map<Int, Pair<Long, Long>> {
+        val total = HashMap<Int, Long>()
+        val background = HashMap<Int, Long>()
+        for (type in listOf(ConnectivityManager.TYPE_WIFI, ConnectivityManager.TYPE_MOBILE)) {
+            runCatching {
+                network.querySummary(type, null, startMs, endMs).use { stats ->
+                    val bucket = NetworkStats.Bucket()
+                    while (stats.hasNextBucket()) {
+                        stats.getNextBucket(bucket)
+                        val b = bucket.rxBytes + bucket.txBytes
+                        total.merge(bucket.uid, b, Long::plus)
+                        if (bucket.state == NetworkStats.Bucket.STATE_DEFAULT) background.merge(bucket.uid, b, Long::plus)
+                    }
+                }
+            }.onFailure { Log.w(TAG, "network by uid type=$type", it) }
+        }
+        return total.mapValues { (uid, t) -> t to (background[uid] ?: 0L) }
+    }
+
     /** アプリ本体・データ・キャッシュの合計バイト数。読めなければ null。 */
     fun storageBytes(uid: Int): Long? = runCatching {
         val s = storage.queryStatsForUid(StorageManager.UUID_DEFAULT, uid)

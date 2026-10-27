@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.home.describe
 import kotlinx.coroutines.delay
+import com.rou39.bentohome.monitor.MonitorActivity.Companion.TAB_INVENTORY
 import java.util.Locale
 
 /** システムモニター（docs/monitor.md）。表示中だけ短い間隔で詳しく読む。 */
@@ -111,11 +112,12 @@ class MonitorActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_TAB = "tab"
-        const val TAB_BENTO = 3
+        const val TAB_INVENTORY = 2
+        const val TAB_BENTO = 4
     }
 }
 
-private val TABS = listOf("概要", "アプリ", "ウィジェット", "Bento")
+private val TABS = listOf("概要", "アプリ", "棚卸し", "ウィジェット", "Bento")
 private val WINDOWS = listOf(5 * 60_000L to "5分", MonitorRepository.WINDOW_MS to "30分")
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -131,7 +133,8 @@ private fun MonitorScreen(vm: MonitorViewModel, initialTab: Int, open: (Intent) 
         when (tab) {
             0 -> OverviewTab(vm, open)
             1 -> AppsTab(vm, open)
-            2 -> WidgetsTab(vm)
+            TAB_INVENTORY -> InventoryTab(vm, open)
+            3 -> WidgetsTab(vm)
             else -> BentoTab(vm, open)
         }
     }
@@ -523,7 +526,7 @@ private const val MAX_PROCESSES = 20
 private const val DAILY_REFRESH_MS = 60_000L
 private const val TRANSPARENCY_REFRESH_MS = 5_000L
 
-private fun percent(v: Float) = String.format(Locale.JAPAN, if (v < 10f && v != 0f) "%.1f%%" else "%.0f%%", v)
+internal fun percent(v: Float) = String.format(Locale.JAPAN, if (v < 10f && v != 0f) "%.1f%%" else "%.0f%%", v)
 private fun celsius(v: Float) = String.format(Locale.JAPAN, "%.1f℃", v)
 private fun milliamp(v: Float) = String.format(Locale.JAPAN, "%.0f mA", v)
 
@@ -532,14 +535,14 @@ private fun rate(kbPerSec: Float) = when {
     else -> String.format(Locale.JAPAN, "%.0f KB/s", kbPerSec)
 }
 
-private fun bytes(b: Long): String = when {
+internal fun bytes(b: Long): String = when {
     b >= 1L shl 30 -> String.format(Locale.JAPAN, "%.1f GB", b / GB)
     b >= 1L shl 20 -> String.format(Locale.JAPAN, "%.0f MB", b / (1024f * 1024f))
     b >= 1L shl 10 -> String.format(Locale.JAPAN, "%.0f KB", b / 1024f)
     else -> "$b B"
 }
 
-private fun duration(ms: Long): String {
+internal fun duration(ms: Long): String {
     val min = ms / 60_000
     return when {
         min >= 60 -> "${min / 60}時間${min % 60}分"

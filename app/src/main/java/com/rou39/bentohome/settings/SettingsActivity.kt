@@ -235,6 +235,15 @@ class SettingsActivity : ComponentActivity() {
                             onClick = {
                                 startActivity(
                                     Intent(this@SettingsActivity, MonitorActivity::class.java)
+                                        .putExtra(MonitorActivity.EXTRA_TAB, MonitorActivity.TAB_INVENTORY),
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("アプリの棚卸し") }
+                        OutlinedButton(
+                            onClick = {
+                                startActivity(
+                                    Intent(this@SettingsActivity, MonitorActivity::class.java)
                                         .putExtra(MonitorActivity.EXTRA_TAB, MonitorActivity.TAB_BENTO),
                                 )
                             },
