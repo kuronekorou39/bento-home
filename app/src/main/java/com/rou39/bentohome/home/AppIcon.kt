@@ -21,7 +21,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.remember
+import com.rou39.bentohome.data.IconDisguise
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -54,9 +60,12 @@ data class IconStyle(
     val shape: IconShape,
     val labelVisible: Boolean,
     val labelSizeSp: Int,
+    val disguise: IconDisguise = IconDisguise.NONE,
+    val revealOnHold: Boolean = true,
 )
 
-fun LauncherSettings.iconStyle() = IconStyle(iconSizeDp.dp, iconShape, labelVisible, labelSize.sp)
+fun LauncherSettings.iconStyle() =
+    IconStyle(iconSizeDp.dp, iconShape, labelVisible, labelSize.sp, iconDisguise, revealOnHold)
 
 /** 表示するバッジ。件数が 0 か、バッジを出さない設定なら null にする。 */
 sealed interface BadgeDisplay {
@@ -94,6 +103,8 @@ fun AppIconView(
     modifier: Modifier = Modifier,
     /** 灰色の段階。0 なら通常の色（plan.md §10）。 */
     grayLevel: Int = 0,
+    /** 何のアプリか分からなくする見せ方。 */
+    disguise: IconDisguise = IconDisguise.NONE,
 ) {
     val gray = grayLevel > 0
     Column(
@@ -107,8 +118,8 @@ fun AppIconView(
             val icon = rememberAppIcon(entry, iconSize, shape, cache)
             when {
                 // グレー表示は彩度を落とすだけ。ラベルの読みやすさとタップ領域は変えない（plan.md §4）
-                icon != null -> Image(
-                    icon,
+                icon != null -> DisguisedIcon(
+                    entry, icon, iconSize, cache, disguise,
                     // ラベルを表示しているときは、名前を二重に読まないよう画像には説明を付けない
                     contentDescription = if (labelSizeSp == null) entry?.label else null,
                     modifier = Modifier.fillMaxSize(),
@@ -125,6 +136,85 @@ fun AppIconView(
         if (labelSizeSp != null) IconLabel(entry?.label ?: "見つからないアプリ", labelSizeSp)
     }
 }
+
+/**
+ * アイコンを、指定の見せ方で描く（[IconDisguise]）。読み上げの説明は元のアプリ名のまま。
+ * - 代表色の丸: アイコンの平均の色だけの丸
+ * - 影絵: テーマアイコン用の単色の層（無ければ前景）の形を、暗い丸の上に白く抜く
+ * - ぼかし: 元のアイコンを強くぼかす
+ */
+@Composable
+fun DisguisedIcon(
+    entry: AppEntry?,
+    icon: ImageBitmap,
+    size: Dp,
+    cache: IconCache,
+    disguise: IconDisguise,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    colorFilter: ColorFilter? = null,
+    alpha: Float = 1f,
+) {
+    val described = modifier.semantics { if (contentDescription != null) this.contentDescription = contentDescription }
+    when (disguise) {
+        IconDisguise.NONE ->
+            Image(icon, contentDescription, modifier = modifier, colorFilter = colorFilter, alpha = alpha)
+        IconDisguise.COLOR -> {
+            val color = remember(icon) { Color(IconRenderer.averageColor(icon.asAndroidBitmap())) }
+            Box(described, contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .fillMaxSize(DISGUISE_DOT_RATIO)
+                        .graphicsLayer { this.alpha = alpha }
+                        .clip(CircleShape)
+                        .background(color),
+                )
+            }
+        }
+        IconDisguise.SILHOUETTE -> {
+            val silhouette = rememberSilhouette(entry, size, cache)
+            Box(
+                described.graphicsLayer { this.alpha = alpha }.clip(CircleShape).background(SILHOUETTE_BACKGROUND),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (silhouette != null) {
+                    Image(silhouette, contentDescription = null, modifier = Modifier.fillMaxSize(SILHOUETTE_RATIO))
+                }
+            }
+        }
+        IconDisguise.BLUR -> Image(
+            icon, contentDescription,
+            modifier = modifier.blur(size * BLUR_RATIO, BlurredEdgeTreatment.Unbounded),
+            colorFilter = colorFilter,
+            alpha = alpha,
+        )
+    }
+}
+
+@Composable
+private fun rememberSilhouette(entry: AppEntry?, size: Dp, cache: IconCache): ImageBitmap? {
+    if (entry == null) return null
+    val px = with(LocalDensity.current) { size.roundToPx() }
+    val key = "${entry.ref.component}#${entry.ref.profileSerial}@$px:silhouette"
+    val bitmap by produceState(cache.get(key)?.asImageBitmap(), key, entry) {
+        if (value == null) {
+            value = withContext(Dispatchers.IO) {
+                IconRenderer.renderSilhouette(entry.info.getIcon(0), px).also { cache.put(key, it) }.asImageBitmap()
+            }
+        }
+    }
+    return bitmap
+}
+
+/** 代表色の丸の、アイコンの大きさに対する割合。 */
+private const val DISGUISE_DOT_RATIO = 0.82f
+
+/** 影絵の形の、丸に対する割合。前景の層には余白があるので大きめにする。 */
+private const val SILHOUETTE_RATIO = 0.9f
+private val SILHOUETTE_BACKGROUND = Color(0xFF3A3A44)
+
+/** ぼかしの強さ（アイコンの大きさに対する割合）。 */
+private const val BLUR_RATIO = 0.14f
 
 /** アイコンの右上のバッジ。アプリとフォルダーで共通。 */
 @Composable

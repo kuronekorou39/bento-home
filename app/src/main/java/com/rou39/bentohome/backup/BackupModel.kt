@@ -3,6 +3,7 @@ package com.rou39.bentohome.backup
 import com.rou39.bentohome.data.AppAppearance
 import com.rou39.bentohome.data.BadgeMode
 import com.rou39.bentohome.data.GrayStages
+import com.rou39.bentohome.data.IconDisguise
 import com.rou39.bentohome.data.LauncherSettings
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.CellRect
@@ -43,8 +44,10 @@ data class BackupFile(
          * v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。
          * v4: アプリの非表示と表示名（BackupAppearance.hidden・label）。v5: ページの仕切り（BackupPage.partition）。
          * v6: 灰色の段階（BackupSettings.grayStages）。
+         * v7: アイコンを隠す設定（BackupSettings.iconDisguise・revealOnHold、BackupAppearance.disguiseExempt）と
+         * 弁当の具材（BackupItem.TYPE_GARNISH）。画像の具材は画像を含めないので書き出さない。
          */
-        const val SCHEMA_VERSION = 6
+        const val SCHEMA_VERSION = 7
     }
 }
 
@@ -69,6 +72,8 @@ data class BackupSettings(
     val grayStages: String? = null,
     val swipeDownNotifications: Boolean = true,
     val loopPages: Boolean = false,
+    val iconDisguise: String? = null,
+    val revealOnHold: Boolean = true,
 )
 
 @Serializable
@@ -98,12 +103,16 @@ data class BackupItem(
     val apps: List<BackupApp>? = null,
     /** ショートカットの ID（v3）。パッケージ名は component、名前は title に入れる。 */
     val shortcutId: String? = null,
+    /** 具材の種類と絵の倍率（v7）。 */
+    val garnish: String? = null,
+    val scale: Float? = null,
 ) {
     companion object {
         const val TYPE_APP = "app"
         const val TYPE_WIDGET = "widget"
         const val TYPE_FOLDER = "folder"
         const val TYPE_SHORTCUT = "shortcut"
+        const val TYPE_GARNISH = "garnish"
     }
 }
 
@@ -122,6 +131,7 @@ data class BackupAppearance(
     val badgeMode: String? = null,
     val hidden: Boolean = false,
     val label: String? = null,
+    val disguiseExempt: Boolean = false,
 )
 
 @Serializable
@@ -190,11 +200,14 @@ object BackupCodec {
             grayStages = settings.grayStages.name,
             swipeDownNotifications = settings.swipeDownNotifications,
             loopPages = settings.loopPages,
+            iconDisguise = settings.iconDisguise.name,
+            revealOnHold = settings.revealOnHold,
         ),
         pages = workspace.orderedPages.map {
             BackupPage(it.id, it.order, it.grid.baseColumns, it.grid.baseRows, it.grid.subdivisions, it.partition.name)
         },
-        items = workspace.items.map { item ->
+        // 画像の具材は画像の中身を持たないので書き出さない
+        items = workspace.items.filterNot { (it.content as? ItemContent.Garnish)?.imagePath != null }.map { item ->
             val r = item.rect
             when (val c = item.content) {
                 is ItemContent.App -> BackupItem(
@@ -213,12 +226,17 @@ object BackupCodec {
                     item.id, item.pageId, BackupItem.TYPE_FOLDER, r.x, r.y, r.width, r.height,
                     title = c.title, apps = c.apps.map { BackupApp(it.component, it.profileSerial) },
                 )
+                is ItemContent.Garnish -> BackupItem(
+                    item.id, item.pageId, BackupItem.TYPE_GARNISH, r.x, r.y, r.width, r.height,
+                    garnish = c.kind, scale = c.scale,
+                )
             }
         },
         dock = workspace.dock.map { BackupDock(it.slot, it.app.component, it.app.profileSerial) },
         appearances = appearances.map { (ref, a) ->
             BackupAppearance(
                 ref.component, ref.profileSerial, a.keepColor, a.excludeFromRanking, a.badgeMode?.name, a.hidden, a.label,
+                a.disguiseExempt,
             )
         },
         usage = usage?.map { (ref, u) ->
@@ -266,6 +284,8 @@ object BackupCodec {
                         WorkspaceItem(b.id, b.pageId, rect, ItemContent.Shortcut(pkg, id, serial, b.title.orEmpty()))
                     }
                 }
+                BackupItem.TYPE_GARNISH ->
+                    WorkspaceItem(b.id, b.pageId, rect, ItemContent.Garnish(b.garnish ?: return@mapNotNull null, scale = b.scale ?: 1f))
                 BackupItem.TYPE_FOLDER -> {
                     val (present, missing) = b.apps.orEmpty().map { AppRef(it.component, it.profileSerial) }
                         .distinct().partition(isInstalled)
@@ -298,10 +318,13 @@ object BackupCodec {
             grayStages = s.grayStages?.let { enumOrNull<GrayStages>(it) } ?: GrayStages.fromLegacyDays(s.grayDays),
             swipeDownNotifications = s.swipeDownNotifications,
             loopPages = s.loopPages,
+            iconDisguise = s.iconDisguise?.let { enumOrNull<IconDisguise>(it) } ?: defaults.iconDisguise,
+            revealOnHold = s.revealOnHold,
         )
         val appearances = file.appearances.associate {
             AppRef(it.component, it.profileSerial) to AppAppearance(
                 it.keepColor, it.excludeFromRanking, it.badgeMode?.let { m -> enumOrNull<BadgeMode>(m) }, it.hidden, it.label,
+                it.disguiseExempt,
             )
         }
         val usage = file.usage?.associate {

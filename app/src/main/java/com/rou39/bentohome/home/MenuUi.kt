@@ -46,6 +46,9 @@ object MenuSymbol {
     const val MONITOR = "∿"
     const val SETTINGS = CONFIGURE
     const val HIDE = "⊘"
+    const val GROW = "⊕"
+    const val SHRINK = "⊖"
+    const val GARNISH = "◒"
 }
 
 @Composable

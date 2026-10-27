@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.IconDisguise
 import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.icon.IconCache
 import com.rou39.bentohome.layout.AppRef
@@ -83,6 +84,8 @@ fun FolderIconView(
     shape: IconShape,
     badge: BadgeDisplay?,
     labelSizeSp: Int?,
+    /** 中のアプリのアイコンの見せ方（ホームのアイコンを隠す設定）。 */
+    disguiseFor: (AppRef) -> IconDisguise = { IconDisguise.NONE },
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -105,7 +108,7 @@ fun FolderIconView(
                         row.forEach { app ->
                             val icon = rememberAppIcon(byRef[app], miniSize, shape, cache)
                             if (icon != null) {
-                                Image(icon, contentDescription = null, modifier = Modifier.size(miniSize))
+                                DisguisedIcon(byRef[app], icon, miniSize, cache, disguiseFor(app), null, Modifier.size(miniSize))
                             } else {
                                 Spacer(Modifier.size(miniSize))
                             }
@@ -157,6 +160,7 @@ fun HomeFolderCell(
             folder, byRef, controller.vm.iconCache, iconSize, style.shape,
             folderBadge(folder.apps, byRef, badgeFor),
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
+            disguiseFor = { controller.disguiseFor(it, controller.isHeld(DragSource.Item(item.id), menuOpen)) },
         )
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -305,6 +309,7 @@ private fun FolderAppCell(
             entry, vm.iconCache, style.iconSize, style.shape, badgeFor(entry),
             labelSizeSp = style.labelSizeSp,
             grayLevel = gray?.level ?: 0,
+            disguise = controller.disguiseFor(app, controller.isHeld(DragSource.FolderApp(folderItemId, app), menuOpen)),
         )
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)

@@ -145,6 +145,8 @@ fun HomeScreen(
     homeResetToFirstPage: Boolean,
     onRequestRole: () -> Unit,
     onOpenWidgetPicker: () -> Unit,
+    /** 具材にする画像を端末から選ぶ。Activity の結果受け取りが要るので HomeActivity が用意する。 */
+    onPickGarnishImage: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenMonitor: () -> Unit,
     onReconfigureWidget: (Int) -> Unit,
@@ -175,6 +177,7 @@ fun HomeScreen(
     controller.dockVisible = settings.dockVisible
     controller.loopPages = settings.loopPages
     controller.style = settings.iconStyle()
+    controller.disguiseExempt = remember(appearances) { appearances.filterValues { it.disguiseExempt }.keys }
     controller.onReconfigureWidget = onReconfigureWidget
     controller.onReAddWidget = onReAddWidget
 
@@ -432,6 +435,10 @@ fun HomeScreen(
                             controller.backgroundMenuAt = null
                             onOpenWidgetPicker()
                         })
+                        BentoMenuItem("具材を置く", MenuSymbol.GARNISH, onClick = {
+                            controller.backgroundMenuAt = null
+                            controller.garnishPickerOpen = true
+                        })
                         if (workspace.items.isNotEmpty()) {
                             BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = { controller.startItemSelection() })
                         }
@@ -480,6 +487,20 @@ fun HomeScreen(
                 byRef = byRef,
                 aspect = pageAspect,
                 onDismiss = { controller.pageManagerOpen = false },
+            )
+        }
+
+        if (controller.garnishPickerOpen) {
+            GarnishPicker(
+                onPick = { kind ->
+                    controller.garnishPickerOpen = false
+                    vm.addGarnish(kind.name)
+                },
+                onPickImage = {
+                    controller.garnishPickerOpen = false
+                    onPickGarnishImage()
+                },
+                onDismiss = { controller.garnishPickerOpen = false },
             )
         }
 
@@ -681,7 +702,8 @@ private fun WorkspacePage(
         if (page != null) {
             PartitionLayer(page.partition, maxWidth, maxHeight)
             val displacedIds = displaced.mapTo(HashSet()) { it.id }
-            for (item in workspace.itemsOn(page.id)) {
+            // 具材は先に描いて、はみ出した絵がアイコンやウィジェットの下に回るようにする
+            for (item in workspace.itemsOn(page.id).sortedBy { it.content !is ItemContent.Garnish }) {
                 key(item.id) {
                     val dragged = when (val source = controller.drag.source) {
                         is DragSource.Item -> source.itemId == item.id
@@ -698,6 +720,7 @@ private fun WorkspacePage(
                             is ItemContent.Folder ->
                                 HomeFolderCell(controller, item, content, byRef, iconSize, badgeFor)
                             is ItemContent.Shortcut -> HomeShortcutCell(controller, item, content, iconSize)
+                            is ItemContent.Garnish -> HomeGarnishCell(controller, item, content)
                         }
                         if (controller.selectingItems && item.id in controller.selectedItems) SelectedMark()
                         if (item.id in controller.pulseIds) PulseRing(controller.pulseToken)
@@ -705,12 +728,20 @@ private fun WorkspacePage(
                 }
             }
             val resizing = controller.resizingItemId?.let { workspace.item(it) }?.takeIf { it.pageId == page.id }
-            val resizingWidget = resizing?.content as? ItemContent.Widget
-            if (resizing != null && resizingWidget != null) {
-                val info = remember(resizingWidget.widgetId) { vm.widgetHost.info(resizingWidget.widgetId) }
-                if (info != null) {
-                    ResizeFrame(controller, resizing, vm.resizeLimits(info), info.resizeMode, cellW, cellH, byRef)
+            when (val content = resizing?.content) {
+                is ItemContent.Widget -> {
+                    val info = remember(content.widgetId) { vm.widgetHost.info(content.widgetId) }
+                    if (info != null) {
+                        ResizeFrame(controller, resizing, vm.resizeLimits(info), info.resizeMode, cellW, cellH, byRef)
+                    }
                 }
+                // 具材は1マスからページいっぱいまで、縦横どちらにも変えられる
+                is ItemContent.Garnish -> ResizeFrame(
+                    controller, resizing,
+                    ResizeLimits(grid.subdivisions, grid.subdivisions, grid.columns, grid.rows),
+                    AppWidgetProviderInfo.RESIZE_BOTH, cellW, cellH, byRef,
+                )
+                else -> Unit
             }
         }
 
@@ -983,6 +1014,7 @@ private fun HomeAppCell(
             entry, controller.vm.iconCache, iconSize, style.shape, badgeFor(entry),
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
             grayLevel = gray?.level ?: 0,
+            disguise = controller.disguiseFor(app, controller.isHeld(DragSource.Item(item.id), menuOpen)),
         )
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -1261,6 +1293,7 @@ private fun DockAppCell(
             entry, controller.vm.iconCache, min(style.iconSize, DOCK_HEIGHT - 16.dp), style.shape, badgeFor(entry),
             labelSizeSp = null,
             grayLevel = gray?.level ?: 0,
+            disguise = controller.disguiseFor(app, controller.isHeld(DragSource.Dock(slot), menuOpen)),
         )
         if (controller.isHeld(DragSource.Dock(slot), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
@@ -1291,10 +1324,15 @@ private fun DragGhost(controller: HomeController, byRef: Map<AppRef, AppEntry>) 
     ) {
         when (visual) {
             is DragVisual.App ->
-                AppIconView(byRef[visual.app], controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null)
+                AppIconView(
+                    byRef[visual.app], controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null,
+                    disguise = controller.disguiseFor(visual.app, held = true),
+                )
             is DragVisual.Shortcut -> ShortcutIconView(visual.shortcut, controller, style.iconSize, labelSizeSp = null)
+            is DragVisual.Garnish -> GarnishArt(visual.garnish, Modifier.fillMaxSize())
             is DragVisual.Folder -> FolderIconView(
                 visual.folder, byRef, controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null,
+                disguiseFor = { controller.disguiseFor(it, held = true) },
             )
             is DragVisual.Widget -> Box(
                 contentAlignment = Alignment.Center,

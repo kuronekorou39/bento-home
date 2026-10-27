@@ -313,7 +313,7 @@ object LayoutEngine {
                 ItemContent.Folder(ItemContent.Folder.DEFAULT_TITLE, listOf(c.app, app))
             }
             is ItemContent.Folder -> if (app in c.apps) c else c.copy(apps = c.apps + app)
-            is ItemContent.Widget, is ItemContent.Shortcut -> return Placement.Blocked
+            is ItemContent.Widget, is ItemContent.Shortcut, is ItemContent.Garnish -> return Placement.Blocked
         }
         return Placement.Ok(replaceContent(ws, targetItemId, folder))
     }

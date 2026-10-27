@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,11 @@ class HomeActivity : ComponentActivity() {
         if (result.resultCode == RESULT_OK) configureOrCommit(pendingWidgetId) else cancelPending()
     }
 
+    /** 具材にする画像を選ぶ。写真の選択画面を使うので、保存領域の権限は要らない。 */
+    private val garnishImageLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let(vm::addGarnishImage)
+    }
+
     private val roleLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshRole()
     }
@@ -74,6 +80,11 @@ class HomeActivity : ComponentActivity() {
                         homeResetToFirstPage = homeResetToFirstPage,
                         onRequestRole = ::requestRole,
                         onOpenWidgetPicker = { showPicker = true },
+                        onPickGarnishImage = {
+                            garnishImageLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
                         onOpenSettings = { startActivity(Intent(this@HomeActivity, SettingsActivity::class.java)) },
                         onOpenMonitor = { startActivity(Intent(this@HomeActivity, MonitorActivity::class.java)) },
                         onReconfigureWidget = { id -> widgetHost.startConfigure(this@HomeActivity, id, REQ_RECONFIGURE) },

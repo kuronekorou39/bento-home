@@ -33,7 +33,7 @@ data class PageEntity(
 data class ItemEntity(
     @PrimaryKey val id: Long,
     val pageId: Long,
-    /** [TYPE_APP]・[TYPE_WIDGET]・[TYPE_FOLDER]・[TYPE_SHORTCUT] */
+    /** [TYPE_APP]・[TYPE_WIDGET]・[TYPE_FOLDER]・[TYPE_SHORTCUT]・[TYPE_GARNISH] */
     val type: String,
     val cellX: Int,
     val cellY: Int,
@@ -47,12 +47,15 @@ data class ItemEntity(
     val title: String? = null,
     /** ショートカットの ID（v5）。パッケージ名は component に入れる。 */
     val shortcutId: String? = null,
+    /** 具材の絵の倍率（v8）。具材の種類は component、画像の場所は title に入れる。 */
+    val scale: Float? = null,
 ) {
     companion object {
         const val TYPE_APP = "APP"
         const val TYPE_WIDGET = "WIDGET"
         const val TYPE_FOLDER = "FOLDER"
         const val TYPE_SHORTCUT = "SHORTCUT"
+        const val TYPE_GARNISH = "GARNISH"
     }
 }
 
@@ -98,6 +101,8 @@ data class AppAppearanceEntity(
     @ColumnInfo(defaultValue = "0") val hidden: Boolean = false,
     /** 表示名（v6）。null なら元の名前。 */
     val label: String? = null,
+    /** アイコンを隠す設定の対象外（v8）。 */
+    @ColumnInfo(defaultValue = "0") val disguiseExempt: Boolean = false,
 )
 
 /** このランチャーからの日別起動回数（plan.md §4）。最大60日分。 */

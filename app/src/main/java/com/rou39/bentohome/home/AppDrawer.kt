@@ -83,7 +83,7 @@ fun homePlacements(ws: Workspace): Map<AppRef, String> {
             when (val c = item.content) {
                 is ItemContent.App -> result.putIfAbsent(c.app, "ホームの${i + 1}ページ目")
                 is ItemContent.Folder -> c.apps.forEach { result.putIfAbsent(it, "ホームの${i + 1}ページ目のフォルダー「${c.title}」") }
-                is ItemContent.Widget, is ItemContent.Shortcut -> Unit
+                is ItemContent.Widget, is ItemContent.Shortcut, is ItemContent.Garnish -> Unit
             }
         }
     }

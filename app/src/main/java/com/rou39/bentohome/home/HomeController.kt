@@ -10,6 +10,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
+import com.rou39.bentohome.data.IconDisguise
 import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.LayoutEngine
@@ -43,6 +44,19 @@ class HomeController(
     var locked by mutableStateOf(false)
     var dockVisible by mutableStateOf(true)
     var style by mutableStateOf(IconStyle(56.dp, IconShape.SYSTEM, true, 12))
+
+    /** アイコンを隠す設定の対象外にしたアプリ（外観の個別設定）。 */
+    var disguiseExempt by mutableStateOf<Set<AppRef>>(emptySet())
+
+    /**
+     * そのアプリのアイコンの見せ方。設定で隠していても、対象外のアプリと、
+     * 「長押しの間は見せる」設定でつまんでいる間は元のアイコンにする。
+     */
+    fun disguiseFor(app: AppRef?, held: Boolean): IconDisguise = when {
+        style.disguise == IconDisguise.NONE || app == null || app in disguiseExempt -> IconDisguise.NONE
+        held && style.revealOnHold -> IconDisguise.NONE
+        else -> style.disguise
+    }
 
     /** 長押しでつまんでいる項目。指を離すまでハイライトする。 */
     var heldSource by mutableStateOf<DragSource?>(null)
@@ -148,6 +162,9 @@ class HomeController(
             pagerState.animateScrollToPage(if (forward) 0 else count - 1)
         }
     }
+
+    /** 具材を選ぶダイアログを開いているか。 */
+    var garnishPickerOpen by mutableStateOf(false)
 
     /** 仕切りを選ぶダイアログを開いているか。 */
     var partitionPickerOpen by mutableStateOf(false)

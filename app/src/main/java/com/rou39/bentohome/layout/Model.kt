@@ -56,6 +56,19 @@ sealed interface ItemContent {
         val label: String,
     ) : ItemContent
 
+    /**
+     * 弁当の具材（飾り）。占有範囲は普通の項目と同じに扱い、絵は scale 倍まで周りへはみ出して描く。
+     * 操作（長押し・運ぶ）は占有範囲だけで受ける。kind は組み込みの具材の名前、または [KIND_IMAGE]。
+     * imagePath は KIND_IMAGE のときの、アプリ内に複製した画像の場所。
+     */
+    data class Garnish(val kind: String, val imagePath: String? = null, val scale: Float = 1f) : ItemContent {
+        companion object {
+            const val KIND_IMAGE = "IMAGE"
+            const val MIN_SCALE = 1f
+            const val MAX_SCALE = 2.5f
+        }
+    }
+
     /** アプリをまとめたフォルダー（plan.md §10）。中が1つ以下になったら [LayoutEngine] がアプリに戻すか消す。 */
     data class Folder(val title: String, val apps: List<AppRef>) : ItemContent {
         companion object {
@@ -97,7 +110,7 @@ data class Workspace(
             when (val c = it.content) {
                 is ItemContent.App -> 1
                 is ItemContent.Folder -> c.apps.size
-                is ItemContent.Widget, is ItemContent.Shortcut -> 0
+                is ItemContent.Widget, is ItemContent.Shortcut, is ItemContent.Garnish -> 0
             }
         }
 

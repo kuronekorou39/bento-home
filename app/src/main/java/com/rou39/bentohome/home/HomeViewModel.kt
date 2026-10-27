@@ -40,6 +40,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** 取り消し可能な操作の通知。message があればスナックバーを出す。 */
 data class UndoState(val message: String?, val token: Long)
@@ -139,6 +141,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             repo.save(ws)
             releaseOrphanWidgetIds(ws)
             releaseOrphanPins(ws)
+            val usedImages = ws.items.mapNotNullTo(HashSet()) { (it.content as? ItemContent.Garnish)?.imagePath }
+            launch(Dispatchers.IO) { GarnishImages.cleanup(getApplication(), usedImages) }
             // 配置を読み込んでから受け取る。読み込み前に届いたものはチャンネルに溜まっている
             launch { c.pinRequests.receiveAsFlow().collect(::placePinned) }
             // 設定画面でマス目やドックの枠を変えたら、ここで配置に反映する
@@ -415,6 +419,40 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- 弁当の具材 ----
+
+    /** 具材を表示中のページの空きに置く。大きさはアイコン1個分から始める。 */
+    fun addGarnish(kind: String, imagePath: String? = null) {
+        val ws = _workspace.value ?: return
+        val span = gridOf(ws).iconSpan
+        val (next, itemId) = placeSomewhere(ws, span, span) { pageId, rect ->
+            WorkspaceItem(0, pageId, rect, ItemContent.Garnish(kind, imagePath))
+        }
+        commit(next, focusItemId = itemId, pulseItemIds = setOfNotNull(itemId))
+    }
+
+    /** 端末の画像を具材にする。画像はアプリ内に縮小して複製する。 */
+    fun addGarnishImage(uri: android.net.Uri) {
+        viewModelScope.launch {
+            val path = withContext(Dispatchers.IO) { GarnishImages.import(getApplication(), uri) }
+            if (path == null) {
+                android.widget.Toast.makeText(getApplication(), "画像を読み込めませんでした", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                addGarnish(ItemContent.Garnish.KIND_IMAGE, path)
+            }
+        }
+    }
+
+    /** 具材の絵のはみ出しの倍率を変える。 */
+    fun setGarnishScale(itemId: Long, scale: Float) {
+        val ws = _workspace.value ?: return
+        val item = ws.item(itemId) ?: return
+        val garnish = item.content as? ItemContent.Garnish ?: return
+        val clamped = scale.coerceIn(ItemContent.Garnish.MIN_SCALE, ItemContent.Garnish.MAX_SCALE)
+        if (clamped == garnish.scale) return
+        commit(ws.copy(items = ws.items.map { if (it.id == itemId) it.copy(content = garnish.copy(scale = clamped)) else it }))
+    }
+
     // ---- ページの整理（plan.md §10） ----
 
     fun movePage(fromIndex: Int, toIndex: Int) {
@@ -680,7 +718,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             when (val c = item.content) {
                 is ItemContent.App -> resolve(c.app)?.let { item.copy(content = ItemContent.App(it)) }
                 is ItemContent.Folder -> item.copy(content = c.copy(apps = c.apps.mapNotNull(::resolve).distinct()))
-                is ItemContent.Widget -> item
+                is ItemContent.Widget, is ItemContent.Garnish -> item
                 is ItemContent.Shortcut ->
                     item.takeUnless { c.profileSerial == catalog.mainProfileSerial && !catalog.isInstalled(c.packageName) }
             }

@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -158,6 +159,10 @@ internal fun MiniItem(controller: HomeController, item: WorkspaceItem, byRef: Ma
         }
         is ItemContent.Folder -> FolderIconView(c, byRef, vm.iconCache, iconSize, shape, null, labelSizeSp = null)
         is ItemContent.Shortcut -> ShortcutIconView(c, controller, iconSize, labelSizeSp = null)
+        is ItemContent.Garnish -> GarnishArt(c, Modifier.fillMaxSize().graphicsLayer {
+            scaleX = c.scale
+            scaleY = c.scale
+        })
         is ItemContent.Widget -> {
             val label = remember(c.widgetId) {
                 vm.widgetHost.info(c.widgetId)?.loadLabel(vm.getApplication<android.app.Application>().packageManager)

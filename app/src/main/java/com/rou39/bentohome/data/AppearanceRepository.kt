@@ -13,6 +13,8 @@ data class AppAppearance(
     val hidden: Boolean = false,
     /** 表示名。null なら元の名前。 */
     val label: String? = null,
+    /** ホームのアイコンを隠す設定のときも、このアプリは元のアイコンで出す。 */
+    val disguiseExempt: Boolean = false,
 ) {
     val isDefault: Boolean get() = this == AppAppearance()
 }
@@ -26,6 +28,7 @@ class AppearanceRepository(private val dao: AppearanceDao) {
                 badgeMode = e.badgeMode?.let { runCatching { BadgeMode.valueOf(it) }.getOrNull() },
                 hidden = e.hidden,
                 label = e.label,
+                disguiseExempt = e.disguiseExempt,
             )
         }
     }
@@ -42,6 +45,7 @@ class AppearanceRepository(private val dao: AppearanceDao) {
         badgeMode = a.badgeMode?.name,
         hidden = a.hidden,
         label = a.label,
+        disguiseExempt = a.disguiseExempt,
     )
 
     suspend fun set(app: AppRef, appearance: AppAppearance) {

@@ -77,6 +77,13 @@ fun AppAppearanceDialog(
                 ) {
                     onChange(appearance.copy(hidden = it))
                 }
+                SwitchLine(
+                    "アイコンを隠さない",
+                    "設定でホームのアイコンを隠しているときも、このアプリは元のアイコンで出す",
+                    appearance.disguiseExempt,
+                ) {
+                    onChange(appearance.copy(disguiseExempt = it))
+                }
                 SwitchLine("通常の色を維持", "使わなくなってもグレー表示にしない", appearance.keepColor) {
                     onChange(appearance.copy(keepColor = it))
                 }

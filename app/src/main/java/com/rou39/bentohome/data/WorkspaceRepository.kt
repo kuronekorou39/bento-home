@@ -89,6 +89,11 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
                 item.id, item.pageId, ItemEntity.TYPE_FOLDER, r.x, r.y, r.width, r.height,
                 component = null, profileSerial = null, widgetId = null, widgetProvider = null, title = c.title,
             )
+            is ItemContent.Garnish -> ItemEntity(
+                item.id, item.pageId, ItemEntity.TYPE_GARNISH, r.x, r.y, r.width, r.height,
+                component = c.kind, profileSerial = null, widgetId = null, widgetProvider = null,
+                title = c.imagePath, scale = c.scale,
+            )
         }
     }
 
@@ -104,6 +109,7 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
             ItemEntity.TYPE_SHORTCUT -> ItemContent.Shortcut(
                 e.component ?: return null, e.shortcutId ?: return null, e.profileSerial ?: 0, e.title.orEmpty(),
             )
+            ItemEntity.TYPE_GARNISH -> ItemContent.Garnish(e.component ?: return null, e.title, e.scale ?: 1f)
             ItemEntity.TYPE_FOLDER -> when (folderApps.size) {
                 0 -> return null
                 1 -> ItemContent.App(folderApps.single())

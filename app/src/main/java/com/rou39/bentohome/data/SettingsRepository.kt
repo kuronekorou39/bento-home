@@ -52,6 +52,17 @@ enum class GrayStages(val days: List<Int>) {
     }
 }
 
+/**
+ * ホームのアイコンを何のアプリか分からなくする見せ方（遊びの機能）。
+ * 隠すのはホーム・ドック・フォルダーだけで、アプリ一覧は元のまま。
+ */
+enum class IconDisguise(val label: String) {
+    NONE("しない"),
+    COLOR("代表色の丸"),
+    SILHOUETTE("影絵"),
+    BLUR("ぼかし"),
+}
+
 enum class DrawerSort(val label: String) {
     NAME("名前順"),
     FREQUENT("よく使う順"),
@@ -77,6 +88,10 @@ data class LauncherSettings(
     val swipeDownNotifications: Boolean = true,
     /** 最後のページの次を最初のページにする（plan.md §10）。 */
     val loopPages: Boolean = false,
+    /** ホームのアイコンを分からなくする見せ方。 */
+    val iconDisguise: IconDisguise = IconDisguise.NONE,
+    /** 隠していても、長押しでつまんでいる間は元のアイコンを見せる。 */
+    val revealOnHold: Boolean = true,
 ) {
     companion object {
         const val SUBDIVISIONS = 2
@@ -109,6 +124,8 @@ class SettingsRepository(private val context: Context) {
         val grayStages = stringPreferencesKey("gray_stages")
         val swipeDownNotifications = booleanPreferencesKey("swipe_down_notifications")
         val loopPages = booleanPreferencesKey("loop_pages")
+        val iconDisguise = stringPreferencesKey("icon_disguise")
+        val revealOnHold = booleanPreferencesKey("reveal_on_hold")
         /**
          * ウィジェットの一覧に出さない提供元（ComponentName.flattenToString()）。
          * "app:パッケージ名" はアプリごと隠したもの（後から増えたウィジェットも隠す）。
@@ -137,6 +154,8 @@ class SettingsRepository(private val context: Context) {
             p[Keys.grayStages] = s.grayStages.name
             p[Keys.swipeDownNotifications] = s.swipeDownNotifications
             p[Keys.loopPages] = s.loopPages
+            p[Keys.iconDisguise] = s.iconDisguise.name
+            p[Keys.revealOnHold] = s.revealOnHold
         }
     }
 
@@ -177,6 +196,8 @@ class SettingsRepository(private val context: Context) {
                 ?: d.grayStages,
             swipeDownNotifications = p[Keys.swipeDownNotifications] ?: d.swipeDownNotifications,
             loopPages = p[Keys.loopPages] ?: d.loopPages,
+            iconDisguise = enumOr(p[Keys.iconDisguise], d.iconDisguise),
+            revealOnHold = p[Keys.revealOnHold] ?: d.revealOnHold,
         )
     }
 

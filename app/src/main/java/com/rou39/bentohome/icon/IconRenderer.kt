@@ -41,6 +41,48 @@ object IconRenderer {
         return bitmap
     }
 
+    /**
+     * 影絵用の形。テーマアイコン用の単色の層（monochrome）があればそれを、無ければ前景の層を使い、
+     * 透明でない部分を白く塗る。旧式アイコンは全体の輪郭になる。
+     */
+    fun renderSilhouette(drawable: Drawable, sizePx: Int): Bitmap {
+        val bitmap = createBitmap(sizePx, sizePx)
+        val canvas = Canvas(bitmap)
+        val layer = (drawable as? AdaptiveIconDrawable)?.let { it.monochrome ?: it.foreground }
+        if (layer != null) {
+            val inset = (sizePx * ADAPTIVE_EXTRA_INSET).toInt()
+            layer.setBounds(-inset, -inset, sizePx + inset, sizePx + inset)
+            layer.draw(canvas)
+        } else {
+            drawable.setBounds(0, 0, sizePx, sizePx)
+            drawable.draw(canvas)
+        }
+        canvas.drawColor(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
+        return bitmap
+    }
+
+    /** アイコンの代表色。透明な部分を除いた平均。 */
+    fun averageColor(bitmap: Bitmap): Int {
+        val small = Bitmap.createScaledBitmap(bitmap, AVERAGE_SAMPLE, AVERAGE_SAMPLE, true)
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var weight = 0L
+        for (x in 0 until AVERAGE_SAMPLE) for (y in 0 until AVERAGE_SAMPLE) {
+            val p = small.getPixel(x, y)
+            val a = Color.alpha(p).toLong()
+            r += Color.red(p) * a
+            g += Color.green(p) * a
+            b += Color.blue(p) * a
+            weight += a
+        }
+        if (weight == 0L) return Color.GRAY
+        return Color.rgb((r / weight).toInt(), (g / weight).toInt(), (b / weight).toInt())
+    }
+
+    /** 代表色を求めるときに縮める大きさ（1辺の px）。 */
+    private const val AVERAGE_SAMPLE = 16
+
     private fun shapePath(shape: IconShape, size: Float): Path = Path().apply {
         when (shape) {
             IconShape.CIRCLE -> addCircle(size / 2, size / 2, size / 2, Path.Direction.CW)
