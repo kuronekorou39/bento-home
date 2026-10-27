@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -46,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
@@ -152,6 +154,9 @@ class SettingsActivity : ComponentActivity() {
                         SwitchRow("ドックを表示", s.dockVisible) { v -> update { it.copy(dockVisible = v) } }
                         SwitchRow("背景を下にスワイプして通知を開く", s.swipeDownNotifications) { v ->
                             update { it.copy(swipeDownNotifications = v) }
+                        }
+                        SwitchRow("ページをループする（最後の次を最初に）", s.loopPages) { v ->
+                            update { it.copy(loopPages = v) }
                         }
 
                         HorizontalDivider()
@@ -361,9 +366,16 @@ private fun Section(title: String) {
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+    // 文字を押しても切り替わるよう、行全体を押せるようにする（スイッチ自体は押しても行に任せる）
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
+            .padding(vertical = 4.dp),
+    ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

@@ -16,6 +16,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -66,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -110,6 +113,7 @@ import com.rou39.bentohome.usage.RankInput
 import com.rou39.bentohome.usage.UsagePolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
@@ -163,6 +167,7 @@ fun HomeScreen(
     val controller = remember { HomeController(vm, drag, geometry, pagerState, scope) }
     controller.locked = settings.layoutLocked
     controller.dockVisible = settings.dockVisible
+    controller.loopPages = settings.loopPages
     controller.style = settings.iconStyle()
     controller.onReconfigureWidget = onReconfigureWidget
     controller.onReAddWidget = onReAddWidget
@@ -224,6 +229,7 @@ fun HomeScreen(
     BackHandler(enabled = controller.drawerOpen) { controller.drawerOpen = false }
     BackHandler(enabled = controller.selectedApps.isNotEmpty()) { controller.clearSelection() }
     BackHandler(enabled = controller.overviewOpen) { controller.overviewOpen = false }
+    BackHandler(enabled = controller.pageManagerOpen) { controller.pageManagerOpen = false }
     BackHandler(enabled = controller.backgroundMenuAt != null) { controller.backgroundMenuAt = null }
     BackHandler(enabled = controller.resizingItemId != null) { controller.resizingItemId = null }
     BackHandler(enabled = controller.openFolderId != null) { controller.closeFolder() }
@@ -270,7 +276,7 @@ fun HomeScreen(
                     state = pagerState,
                     beyondViewportPageCount = pages.size + 1,
                     key = pageKey,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().loopAtEdges(controller),
                 ) { index ->
                     val page = pages.getOrNull(index)
                     // 見えていないページ・一覧の下のウィジェットは View を非表示にして、提供元のアニメーションを止める
@@ -376,6 +382,12 @@ fun HomeScreen(
                             onOpenWidgetPicker()
                         })
                     }
+                    if (pages.size >= 2) {
+                        DropdownMenuItem(text = { Text("ページの整理") }, onClick = {
+                            controller.backgroundMenuAt = null
+                            controller.pageManagerOpen = true
+                        })
+                    }
                     DropdownMenuItem(text = { Text("仕切り") }, onClick = {
                         controller.backgroundMenuAt = null
                         controller.partitionPickerOpen = true
@@ -404,6 +416,17 @@ fun HomeScreen(
                     })
                 }
             }
+        }
+
+        if (controller.pageManagerOpen) {
+            val area = geometry.gridArea
+            PageManager(
+                controller = controller,
+                workspace = workspace,
+                byRef = byRef,
+                aspect = if (area.height > 0f) area.width / area.height else DEFAULT_PAGE_ASPECT,
+                onDismiss = { controller.pageManagerOpen = false },
+            )
         }
 
         if (controller.partitionPickerOpen) {
@@ -444,6 +467,37 @@ fun HomeScreen(
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing))
     }
 }
+
+/**
+ * ループの設定がオンのとき、端のページで外へめくったら反対の端へ移る（plan.md §10）。
+ * 指の動きを見るだけで消費しないので、ページャーの端の伸び縮みの表示はそのまま出る。
+ */
+private fun Modifier.loopAtEdges(controller: HomeController): Modifier = this.then(
+    Modifier.pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val pager = controller.pagerState
+            if (!controller.loopPages || controller.drag.active || pager.pageCount < 2) return@awaitEachGesture
+            if (pager.currentPageOffsetFraction != 0f) return@awaitEachGesture
+            val atFirst = pager.currentPage == 0
+            val atLast = pager.currentPage == pager.pageCount - 1
+            if (!atFirst && !atLast) return@awaitEachGesture
+            var total = Offset.Zero
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) break
+                total += change.position - change.previousPosition
+            }
+            if (controller.drag.active || abs(total.x) < abs(total.y)) return@awaitEachGesture
+            val threshold = LOOP_THRESHOLD_PX
+            when {
+                atLast && total.x < -threshold -> controller.wrapPage(forward = true)
+                atFirst && total.x > threshold -> controller.wrapPage(forward = false)
+            }
+        }
+    },
+)
 
 /** 背景の縦スワイプ。上でアプリ一覧、下で通知パネル（onSwipeDown が null なら何もしない）。 */
 private fun Modifier.verticalSwipe(threshold: Float, onSwipeUp: () -> Unit, onSwipeDown: (() -> Unit)?): Modifier =
@@ -640,6 +694,11 @@ private fun Modifier.cellPlacement(rect: CellRect, cellW: Dp, cellH: Dp): Modifi
 
 private enum class Edge { LEFT, TOP, RIGHT, BOTTOM }
 
+/** 提供元の指定で、どちらかの方向に大きさを変えられるか。 */
+private fun resizable(info: AppWidgetProviderInfo, limits: ResizeLimits): Boolean =
+    (info.resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0 && limits.widthAdjustable) ||
+        (info.resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0 && limits.heightAdjustable)
+
 /**
  * ウィジェットのリサイズ枠。辺のつまみを動かすと1マス刻みで大きさが変わり、置けない大きさは赤で示す。
  * 指を離したときに置ける大きさなら確定する。提供元が許す方向・範囲だけ動かせる。
@@ -686,8 +745,9 @@ private fun ResizeFrame(
             .border(2.dp, if (valid) Color.White else Color(0xFFFF3B30), RoundedCornerShape(16.dp))
             .background(if (valid) Color(0x22FFFFFF) else NG_COLOR, RoundedCornerShape(16.dp)),
     ) {
-        val horizontal = resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0
-        val vertical = resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0
+        // 提供元が許していても、最小と最大が同じ方向はつまみを出さない（引いても変わらないため）
+        val horizontal = resizeMode and AppWidgetProviderInfo.RESIZE_HORIZONTAL != 0 && limits.widthAdjustable
+        val vertical = resizeMode and AppWidgetProviderInfo.RESIZE_VERTICAL != 0 && limits.heightAdjustable
         val edges = buildList {
             if (horizontal) addAll(listOf(Edge.LEFT, Edge.RIGHT))
             if (vertical) addAll(listOf(Edge.TOP, Edge.BOTTOM))
@@ -886,11 +946,15 @@ private fun HomeWidgetCell(
             if (controller.locked) {
                 DropdownMenuItem(text = { Text("配置はロック中です") }, onClick = { menuOpen = false })
             } else {
-                if (info != null && info.resizeMode != AppWidgetProviderInfo.RESIZE_NONE) {
-                    DropdownMenuItem(text = { Text("サイズ変更") }, onClick = {
-                        menuOpen = false
-                        controller.resizingItemId = item.id
-                    })
+                if (info != null) {
+                    if (resizable(info, vm.resizeLimits(info))) {
+                        DropdownMenuItem(text = { Text("サイズ変更") }, onClick = {
+                            menuOpen = false
+                            controller.resizingItemId = item.id
+                        })
+                    } else {
+                        DropdownMenuItem(text = { Text("サイズは変えられません（提供元の指定）") }, onClick = {}, enabled = false)
+                    }
                 }
                 DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
                     menuOpen = false

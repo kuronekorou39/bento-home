@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
@@ -171,6 +172,70 @@ private fun MiniItem(controller: HomeController, item: WorkspaceItem, byRef: Map
                     .background(Color.White.copy(alpha = 0.25f)),
             ) {
                 Text(label, color = Color.White, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * ページの整理（plan.md §10）。縮小したページを並べ、◀▶で順番を入れ替える。空のページは削除できる。
+ * 変更はすぐ反映し、取り消せる。
+ */
+@Composable
+fun PageManager(
+    controller: HomeController,
+    workspace: Workspace,
+    byRef: Map<AppRef, AppEntry>,
+    aspect: Float,
+    onDismiss: () -> Unit,
+) {
+    val vm = controller.vm
+    val pages = workspace.orderedPages
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF101014))
+            .pointerInput(Unit) { detectTapGestures { } }
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            Text("ページの整理", color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onDismiss) { Text("完了") }
+        }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            // 下に「元に戻す」のお知らせが出るので、最後の行のボタンが隠れないよう余白を空ける
+            contentPadding = PaddingValues(bottom = 96.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        ) {
+            itemsIndexed(pages, key = { _, p -> p.id }) { index, page ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(aspect)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(16.dp)),
+                    ) { PageMiniature(controller, workspace, page, byRef) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { vm.movePage(index, index - 1) }, enabled = index > 0) {
+                            Text("◀", modifier = Modifier.semantics { contentDescription = "前へ" })
+                        }
+                        Text((index + 1).toString(), color = Color.LightGray, fontSize = 13.sp)
+                        TextButton(onClick = { vm.movePage(index, index + 1) }, enabled = index < pages.lastIndex) {
+                            Text("▶", modifier = Modifier.semantics { contentDescription = "後ろへ" })
+                        }
+                    }
+                    if (pages.size > 1 && workspace.itemsOn(page.id).isEmpty()) {
+                        TextButton(onClick = { vm.removeEmptyPage(index) }) { Text("空のページを削除") }
+                    }
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
@@ -19,6 +20,7 @@ import com.rou39.bentohome.monitor.WidgetMetrics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -64,6 +66,27 @@ class HomeController(
         overviewOpen = false
     }
 
+    /** ページの整理を開いているか。 */
+    var pageManagerOpen by mutableStateOf(false)
+
+    /** 最後のページの次を最初のページにするか（設定、plan.md §10）。 */
+    var loopPages by mutableStateOf(false)
+
+    /**
+     * 端のページで外へめくったら反対の端へ移る。アイコンを運んでいる間はしない（末尾に置き先のページを出すため）。
+     * @param forward 最後のページで左へめくった（次へ進む向き）なら true
+     */
+    fun wrapPage(forward: Boolean) {
+        if (!loopPages || drag.active) return
+        val count = pagerState.pageCount
+        if (count < 2) return
+        scope.launch {
+            // 指を離した直後はページャー自身の寄せる動きが走り、こちらの移動を打ち消すので、終わってから動かす
+            snapshotFlow { pagerState.isScrollInProgress }.first { !it }
+            pagerState.animateScrollToPage(if (forward) 0 else count - 1)
+        }
+    }
+
     /** 仕切りを選ぶダイアログを開いているか。 */
     var partitionPickerOpen by mutableStateOf(false)
 
@@ -107,6 +130,7 @@ class HomeController(
         appearanceTarget = null
         closeFolder()
         partitionPickerOpen = false
+        pageManagerOpen = false
         clearSelection()
         drag.clear()
         measureJob?.cancel()
@@ -255,18 +279,30 @@ class HomeController(
     /** ウィジェット上の横ドラッグでページを動かす。 */
     val pagerDrag = PagerDragHandler(
         onDrag = { dx -> pagerState.dispatchRawDelta(-dx) },
-        onDragEnd = { velocity ->
-            scope.launch {
-                val position = pagerState.currentPage + pagerState.currentPageOffsetFraction
-                val target = when {
-                    velocity < -FLING_VELOCITY -> ceil(position)
-                    velocity > FLING_VELOCITY -> floor(position)
-                    else -> position.roundToInt().toFloat()
-                }.toInt().coerceIn(0, (pagerState.pageCount - 1).coerceAtLeast(0))
-                pagerState.animateScrollToPage(target)
+        onDragEnd = { velocity, totalDx ->
+            val last = pagerState.pageCount - 1
+            val atEdge = pagerState.currentPageOffsetFraction == 0f
+            when {
+                // ウィジェットの上の横ドラッグでも、端のページで外へめくったら反対の端へ
+                loopPages && atEdge && pagerState.currentPage == last && totalDx < -LOOP_THRESHOLD_PX -> wrapPage(forward = true)
+                loopPages && atEdge && pagerState.currentPage == 0 && totalDx > LOOP_THRESHOLD_PX -> wrapPage(forward = false)
+                else -> settle(velocity)
             }
         },
     )
+
+    /** 指を離した位置と速さから、近いページへ寄せる。 */
+    private fun settle(velocity: Float) {
+        scope.launch {
+            val position = pagerState.currentPage + pagerState.currentPageOffsetFraction
+            val target = when {
+                velocity < -FLING_VELOCITY -> ceil(position)
+                velocity > FLING_VELOCITY -> floor(position)
+                else -> position.roundToInt().toFloat()
+            }.toInt().coerceIn(0, (pagerState.pageCount - 1).coerceAtLeast(0))
+            pagerState.animateScrollToPage(target)
+        }
+    }
 
     private companion object {
         /** 表示を切り替えてから測り始めるまでの待ち。 */
@@ -281,5 +317,8 @@ class HomeController(
         const val FLING_VELOCITY = 800f
     }
 }
+
+/** 端のページでこれ以上外へめくったら、反対の端へ移る（px、plan.md §10）。 */
+internal const val LOOP_THRESHOLD_PX = 160f
 
 data class MeasureResult(val itemId: Long, val label: String, val measurement: WidgetMeasurement)

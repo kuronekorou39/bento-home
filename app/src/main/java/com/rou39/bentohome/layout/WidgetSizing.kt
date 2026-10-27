@@ -55,6 +55,9 @@ object WidgetSizing {
 }
 
 data class ResizeLimits(val minWidth: Int, val minHeight: Int, val maxWidth: Int, val maxHeight: Int) {
+    val widthAdjustable: Boolean get() = minWidth < maxWidth
+    val heightAdjustable: Boolean get() = minHeight < maxHeight
+
     fun clampWidth(w: Int) = w.coerceIn(minWidth, maxWidth)
     fun clampHeight(h: Int) = h.coerceIn(minHeight, maxHeight)
 }

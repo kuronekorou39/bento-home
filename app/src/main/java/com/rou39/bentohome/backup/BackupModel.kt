@@ -68,6 +68,7 @@ data class BackupSettings(
     /** v6: 灰色の段階。無ければ grayDays から決める。 */
     val grayStages: String? = null,
     val swipeDownNotifications: Boolean = true,
+    val loopPages: Boolean = false,
 )
 
 @Serializable
@@ -188,6 +189,7 @@ object BackupCodec {
             grayDays = settings.grayStages.days.first(),
             grayStages = settings.grayStages.name,
             swipeDownNotifications = settings.swipeDownNotifications,
+            loopPages = settings.loopPages,
         ),
         pages = workspace.orderedPages.map {
             BackupPage(it.id, it.order, it.grid.baseColumns, it.grid.baseRows, it.grid.subdivisions, it.partition.name)
@@ -295,6 +297,7 @@ object BackupCodec {
             grayInDrawer = s.grayInDrawer,
             grayStages = s.grayStages?.let { enumOrNull<GrayStages>(it) } ?: GrayStages.fromLegacyDays(s.grayDays),
             swipeDownNotifications = s.swipeDownNotifications,
+            loopPages = s.loopPages,
         )
         val appearances = file.appearances.associate {
             AppRef(it.component, it.profileSerial) to AppAppearance(

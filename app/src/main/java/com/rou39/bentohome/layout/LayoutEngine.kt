@@ -105,6 +105,24 @@ object LayoutEngine {
         return current to ids
     }
 
+    /** ページの順番を変える（plan.md §10）。toIndex は並べ替えた後の位置。 */
+    fun movePage(ws: Workspace, pageId: Long, toIndex: Int): Workspace {
+        val ordered = ws.orderedPages.toMutableList()
+        val from = ordered.indexOfFirst { it.id == pageId }
+        if (from < 0) return ws
+        val page = ordered.removeAt(from)
+        ordered.add(toIndex.coerceIn(0, ordered.size), page)
+        val orders = ordered.mapIndexed { i, p -> p.id to i }.toMap()
+        return ws.copy(pages = ws.pages.map { it.copy(order = orders.getValue(it.id)) })
+    }
+
+    /** 空のページを消す。項目のあるページと、最後の1ページは消さない。 */
+    fun removeEmptyPage(ws: Workspace, pageId: Long): Workspace {
+        if (ws.pages.size <= 1 || ws.itemsOn(pageId).isNotEmpty()) return ws
+        val rest = ws.orderedPages.filter { it.id != pageId }.mapIndexed { i, p -> p.copy(order = i) }
+        return ws.copy(pages = rest)
+    }
+
     fun setPartition(ws: Workspace, pageId: Long, partition: Partition): Workspace =
         ws.copy(pages = ws.pages.map { if (it.id == pageId) it.copy(partition = partition) else it })
 

@@ -74,6 +74,8 @@ data class LauncherSettings(
     val grayStages: GrayStages = GrayStages.MEDIUM,
     /** ホームの背景を下にスワイプして通知パネルを開く（plan.md §10）。 */
     val swipeDownNotifications: Boolean = true,
+    /** 最後のページの次を最初のページにする（plan.md §10）。 */
+    val loopPages: Boolean = false,
 ) {
     companion object {
         const val SUBDIVISIONS = 2
@@ -105,6 +107,7 @@ class SettingsRepository(private val context: Context) {
         val legacyGrayDays = intPreferencesKey("gray_days")
         val grayStages = stringPreferencesKey("gray_stages")
         val swipeDownNotifications = booleanPreferencesKey("swipe_down_notifications")
+        val loopPages = booleanPreferencesKey("loop_pages")
     }
 
     val settings: Flow<LauncherSettings> = context.settingsStore.data.map(::read)
@@ -127,6 +130,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.grayInDrawer] = s.grayInDrawer
             p[Keys.grayStages] = s.grayStages.name
             p[Keys.swipeDownNotifications] = s.swipeDownNotifications
+            p[Keys.loopPages] = s.loopPages
         }
     }
 
@@ -152,6 +156,7 @@ class SettingsRepository(private val context: Context) {
                 ?: p[Keys.legacyGrayDays]?.let(GrayStages::fromLegacyDays)
                 ?: d.grayStages,
             swipeDownNotifications = p[Keys.swipeDownNotifications] ?: d.swipeDownNotifications,
+            loopPages = p[Keys.loopPages] ?: d.loopPages,
         )
     }
 

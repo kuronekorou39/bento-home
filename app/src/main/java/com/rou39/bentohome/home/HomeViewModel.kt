@@ -348,6 +348,22 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---- ページの整理（plan.md §10） ----
+
+    fun movePage(fromIndex: Int, toIndex: Int) {
+        val ws = _workspace.value ?: return
+        val page = ws.pageAt(fromIndex) ?: return
+        val next = LayoutEngine.movePage(ws, page.id, toIndex)
+        if (next != ws) commit(next, message = "ページを並べ替えました")
+    }
+
+    fun removeEmptyPage(index: Int) {
+        val ws = _workspace.value ?: return
+        val page = ws.pageAt(index) ?: return
+        val next = LayoutEngine.removeEmptyPage(ws, page.id)
+        if (next != ws) commit(next, message = "空のページを削除しました")
+    }
+
     // ---- 仕切り（plan.md §10） ----
 
     fun setPartition(pageIndex: Int, partition: Partition) {

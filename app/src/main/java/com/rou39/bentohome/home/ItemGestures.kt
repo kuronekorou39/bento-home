@@ -112,7 +112,8 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
 /** ウィジェット上の横ドラッグを、ページ送りとして受け取る先。 */
 class PagerDragHandler(
     val onDrag: (dx: Float) -> Unit,
-    val onDragEnd: (velocityX: Float) -> Unit,
+    /** totalDx は指を動かした合計。端のページで外へめくったかを見るのに使う（ページは動かない）。 */
+    val onDragEnd: (velocityX: Float, totalDx: Float) -> Unit,
 )
 
 /**
@@ -184,6 +185,7 @@ fun Modifier.widgetGestures(
                         val downRoot = coords.localToRoot(down.position)
                         pager.onDrag(slopRoot.x - downRoot.x)
                         var lastRoot = slopRoot
+                        var totalDx = slopRoot.x - downRoot.x
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             event.changes.forEach { it.consume() }
@@ -191,11 +193,12 @@ fun Modifier.widgetGestures(
                             if (change != null && change.pressed) {
                                 val root = coords.localToRoot(change.position)
                                 pager.onDrag(root.x - lastRoot.x)
+                                totalDx += root.x - lastRoot.x
                                 tracker.addPosition(change.uptimeMillis, root)
                                 lastRoot = root
                             }
                         } while (event.changes.any { it.pressed })
-                        pager.onDragEnd(tracker.calculateVelocity().x)
+                        pager.onDragEnd(tracker.calculateVelocity().x, totalDx)
                     }
                     else -> Unit
                 }
