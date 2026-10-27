@@ -65,6 +65,14 @@
             android:label="@string/monitor_label"
             android:theme="@style/Theme.Bento.Settings" />
 
+        <!-- 計測用プロセス（PC の adb から起動）から窓口を受け取る（docs/monitor.md）。
+             INTERACT_ACROSS_USERS_FULL はシェルが持ち、一般のアプリは持てない -->
+        <provider
+            android:name=".monitor.PrivilegedReceiver"
+            android:authorities="${applicationId}.privileged"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <service
             android:name=".badge.BadgeListenerService"
             android:exported="true"

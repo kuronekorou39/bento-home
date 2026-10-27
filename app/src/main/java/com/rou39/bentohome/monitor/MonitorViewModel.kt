@@ -2,6 +2,8 @@ package com.rou39.bentohome.monitor
 
 import android.Manifest
 import android.app.Application
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.TrafficStats
@@ -16,6 +18,7 @@ import androidx.lifecycle.viewModelScope
 import com.rou39.bentohome.badge.BadgeListenerService
 import com.rou39.bentohome.container
 import com.rou39.bentohome.layout.ItemContent
+import com.rou39.bentohome.monitor.priv.PrivilegedProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -114,6 +117,14 @@ class MonitorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val packageName: String = app.packageName
+
+    /** PC の adb から計測用プロセスを起動するコマンド。 */
+    val startCommand = PrivilegedProtocol.startCommand(packageName)
+
+    fun copyStartCommand() {
+        val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("adb", startCommand))
+    }
 
     fun forceStop(packageName: String) {
         viewModelScope.launch(Dispatchers.IO) { privileged.exec("am", "force-stop", packageName) }

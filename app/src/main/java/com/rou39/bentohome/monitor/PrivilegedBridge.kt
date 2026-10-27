@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * シェル権限で動く計測用プロセス（[com.rou39.bentohome.monitor.priv.PrivilegedService]）との接続（docs/monitor.md）。
  *
- * 起動と Binder の受け渡しはここでは行わない。外部から [connect] で窓口を渡す。
+ * 起動は PC の adb から行い（[com.rou39.bentohome.monitor.priv.Starter]）、
+ * 窓口は [PrivilegedReceiver] が受け取って [connect] に渡す。
  * 渡されていない間は [service] が null のままで、各機能はアプリの権限で読める範囲に縮む。
  */
 class PrivilegedBridge {
@@ -29,9 +30,14 @@ class PrivilegedBridge {
     private var users = 0
     private var deathRecipient: IBinder.DeathRecipient? = null
 
-    /** 差し込み口: 計測用プロセスの窓口を渡す。プロセスが終わると自動で切り離す。 */
+    /**
+     * 差し込み口: 計測用プロセスの窓口を渡す。プロセスが終わると自動で切り離す。
+     * 別の計測用プロセスにつながっていたら、古いコードが残らないようそちらは終了させる。
+     */
     fun connect(binder: IBinder) {
+        val old = _service.value
         disconnect()
+        if (old != null && old.asBinder() != binder) runCatching { old.destroy() }
         if (!binder.pingBinder()) return
         val recipient = IBinder.DeathRecipient { clear() }
         runCatching { binder.linkToDeath(recipient, 0) }.onFailure {

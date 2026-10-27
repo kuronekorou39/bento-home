@@ -67,11 +67,18 @@ adb shell pm grant com.rou39.bentohome android.permission.DUMP
 
 ### 計測用プロセス（全プロセスの CPU・メモリ、端末の CPU 使用率）
 
-- 外部アプリは使わない。Bento 自身の計測用プロセス（`monitor/priv/PrivilegedService`）を、シェル権限で起動する。
-- 起動部分は未実装（手で実装する予定）。実装したら、起動のコマンドをここに書く。
-- 起動した仕組みは、計測用プロセスの窓口を `AppContainer.privileged.connect(binder)` に渡す。画面側はそれだけで表示を始める。
-- `PrivilegedBridge.inUse` が false の間（モニター画面を閉じている間）は、プロセスを止めてよい。
+- 外部アプリは使わない。Bento 自身の計測用プロセス（`monitor/priv/Starter` → `PrivilegedService`）を、PC の adb からシェル権限で起動する。
+- 起動のコマンド（PowerShell でも bash でもそのまま貼れる。デバッグ版はパッケージ名を `com.rou39.bentohome.debug` にする。モニター画面の「コマンドをコピー」でも得られる）:
+
+  ```
+  adb shell 'p=$(pm path com.rou39.bentohome | head -n1 | cut -d: -f2); CLASSPATH=$p setsid app_process /system/bin com.rou39.bentohome.monitor.priv.Starter com.rou39.bentohome &'
+  ```
+
+- 「Bento に接続しました」と表示されたら成功。コマンドはすぐ戻り、プロセスは端末を再起動するまで動き続ける（プロセス名は `<パッケージ名>:monitor`）。
 - 端末を再起動すると止まるので、そのたびに PC から起動し直す。
+- Bento を更新・アンインストールすると、計測用プロセスは自分で終了する。更新後は起動し直す。
+- もう一度起動すると、Bento は古い計測用プロセスを終了させて新しいほうに切り替える。
+- 手で止める場合: `adb shell pkill -f bentohome.*:monitor`
 
 ## バックアップと復元
 

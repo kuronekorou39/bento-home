@@ -22,6 +22,7 @@ Android 17 は、他のアプリのプロセスをアプリから見せない。
 
 - adb で付与した DUMP は、`dumpsys thermalservice` と `dumpsys netstats` には効くが、プロセスの情報には効かない。
 - adb での付与は再起動後も残る。計測用プロセスは再起動のたびに PC の adb から起動し直す（`docs/operations.md`）。
+- 起動は `app_process` で Bento の APK の `Starter` を動かし、窓口（Binder）を Bento の ContentProvider（`PrivilegedReceiver`）に渡す。Shizuku と同じ方式を Bento 自身で行う（§2）。
 - 計測用プロセスが動いているときは、モニター画面から使用状況へのアクセスと DUMP をまとめて付与できる（`appops set` と `pm grant` をシェル権限で実行）。
 
 ## 2. 構成（`monitor/`）
@@ -29,7 +30,10 @@ Android 17 は、他のアプリのプロセスをアプリから見せない。
 | 部品 | 役割 |
 |---|---|
 | `priv/PrivilegedService` + `IPrivilegedService.aidl` | シェル権限で起動する計測用プロセス。`/proc/stat`、全プロセスの `/proc/<pid>/stat`、`/proc/net/dev`、電池の電流を読み、行形式のテキストで返す。コマンド実行（`exec`）も持つ |
-| `PrivilegedBridge` | 計測用プロセスとの接続。差し込み口は `connect(binder)` の1か所。プロセスが終わると自動で切り離す。`inUse` で、使う画面があるかを起動する側に知らせる |
+| `priv/Starter` | 計測用プロセスの入口（`app_process` から起動）。Bento の uid を聞いてから窓口を渡し、標準入出力を閉じて待機する。Bento のプロセスが終わったら渡し直し、APK が消えたら（更新・削除）終了する。ContentProvider は隠し API（`IActivityManager.getContentProviderExternal`）をリフレクションで呼ぶ |
+| `priv/PrivilegedProtocol` | `Starter` と Bento の間の取り決め（authority・メソッド名・起動コマンド） |
+| `PrivilegedReceiver` | 窓口を受け取る ContentProvider。INTERACT_ACROSS_USERS_FULL を要求し、呼び出し元がシェルか root かも確かめる |
+| `PrivilegedBridge` | 計測用プロセスとの接続。差し込み口は `connect(binder)` の1か所。プロセスが終わると自動で切り離す。別の計測用プロセスが来たら古いほうを終了させる |
 | `ProcSnapshot`・`ProcMath` | 行形式の解析と、2時点の差からの CPU 使用率の計算（単体テスト対象） |
 | `Temperatures` | `dumpsys thermalservice` の解析。HAL の現在値を優先し、無いものはキャッシュから補う（単体テスト対象） |
 | `MonitorRepository` | 定期的に読み、直近30分の時系列をメモリに持つ |
@@ -86,7 +90,12 @@ Android 17 は、他のアプリのプロセスをアプリから見せない。
 | モニター表示中・デバッグ版（最適化後） | 約6% | 約6.5% |
 | モニター表示中・リリース版 | 約5%（大半はファイルを開くカーネル側の処理） | 約3% |
 
-最適化は、`/proc/<pid>/stat` を文字列に分割せずバイト列から直接数値を拾う、uid とプロセス名を pid と開始時刻で覚えておく、の2点。計測用プロセスはモニターを閉じると終わる。
+最適化は、`/proc/<pid>/stat` を文字列に分割せずバイト列から直接数値を拾う、uid とプロセス名を pid と開始時刻で覚えておく、の2点。計測用プロセスは再起動まで動き続けるが、モニターを閉じている間は呼ばれないので CPU を使わない（実機で 30秒間 0 tick）。
+
+### 安全のための制限
+
+- 計測用プロセスはシェル権限でコマンドを実行できるので、Bento の uid 以外からの呼び出しは `onTransact` で拒否する。
+- 受け取り口の ContentProvider は、一般のアプリが持てない INTERACT_ACROSS_USERS_FULL を要求し、さらに呼び出し元の uid がシェル（2000）か root（0）であることを確かめる。偽の窓口を渡されることを防ぐ。
 
 ## 6. 確認した項目
 
@@ -101,9 +110,14 @@ Android 17 は、他のアプリのプロセスをアプリから見せない。
 | リリース版（R8 で縮小）での計測用プロセス | 合格。INTERNET 権限なし。確認後にリリース版は削除 |
 | 「後ろのページへ移す」 | 単体テストのみ。実機では配置を変えないため押していない |
 | 強制停止 | 未確認（他のアプリを止めるため） |
-| 計測用プロセスの起動部分（Bento 自身） | 未実装 |
+| 計測用プロセスの起動部分（Bento 自身、adb から起動） | 合格。約2秒でコマンドが戻り、接続する |
+| Bento を強制終了したあとの再接続 | 合格。自動で渡し直す |
+| Bento の更新後 | 合格。古い計測用プロセスは数秒で自分で終了する |
+| モニターを閉じている間の負荷 | 合格。30秒間で 0 tick |
 
 ## 7. 気づいた点
 
 - 計測用プロセスの起動を一時的に Shizuku（外部アプリ）で行ったが、外部アプリは使わない方針のため、Shizuku は端末から削除し、ライブラリもコードから外した。起動部分は Bento 自身で用意する（`docs/operations.md`）。
-- 計測用プロセスの版を変えずに中身だけ更新すると、起動する側が古いプロセスを使い回すことがある。起動部分を作るときは、更新後に作り直すようにする。
+- Shizuku では、計測用プロセスの版を変えずに中身だけ更新すると古いプロセスが使い回された。自前の起動では、APK が消えたら終了し、新しく起動したら古いほうを終了させるので起きない。
+- プロセス名は起動時に `<パッケージ名>:monitor` に付け替える（`Process.setArgV0`）。付け替えないと一覧に「app_process」と出る。
+- Bento を入れ直すと既定のホームが外れ、ホームの選択画面が出ることがある。

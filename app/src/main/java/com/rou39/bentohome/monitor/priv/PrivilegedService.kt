@@ -1,5 +1,7 @@
 package com.rou39.bentohome.monitor.priv
 
+import android.os.Binder
+import android.os.Parcel
 import android.system.Os
 import android.system.OsConstants
 import java.io.File
@@ -8,11 +10,24 @@ import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
 /**
- * シェル権限（uid 2000）で起動したプロセスで動く。起動と Bento への受け渡しは別に用意する。
+ * シェル権限（uid 2000）で起動したプロセスで動く。起動と Bento への受け渡しは [Starter] が行う。
  * アプリの権限では読めない /proc の値をまとめて返す（docs/monitor.md）。
  * 形式は [com.rou39.bentohome.monitor.ProcSnapshot] が解析する。
  */
 class PrivilegedService : IPrivilegedService.Stub() {
+    /** 呼び出しを受け付ける uid（Bento）。[Starter] が窓口を渡す前に設定する。それまではすべて拒否する。 */
+    @Volatile
+    var allowedUid = -1
+
+    /** シェル権限でコマンドを実行できるので、Bento 以外からの呼び出しは断る。 */
+    override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+        if (code in FIRST_CALL_TRANSACTION..LAST_CALL_TRANSACTION) {
+            val caller = Binder.getCallingUid()
+            if (caller != allowedUid) throw SecurityException("uid $caller は計測用プロセスを使えません")
+        }
+        return super.onTransact(code, data, reply, flags)
+    }
+
     /** uid とプロセス名は起動中に変わらないので、pid と開始時刻で覚えておく。 */
     private class Known(val uid: Int, val name: String)
     private val procs = HashMap<Long, Known>()

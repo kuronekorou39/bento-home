@@ -60,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -221,9 +222,11 @@ private fun AccessCard(vm: MonitorViewModel, open: (Intent) -> Unit) {
             Text("表示できる情報を増やす", style = MaterialTheme.typography.titleSmall)
             if (!connected) {
                 Text(
-                    "全プロセスの CPU・メモリと端末の CPU 使用率は、計測用プロセスを PC の adb から起動すると表示されます（docs/operations.md）。",
+                    "全プロセスの CPU・メモリと端末の CPU 使用率は、PC につないで次のコマンドで計測用プロセスを起動すると表示されます。端末を再起動するまで動き続けます。",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                Text(vm.startCommand, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                OutlinedButton(onClick = vm::copyStartCommand) { Text("コマンドをコピー") }
             }
             if (!usage || !dump) {
                 Text(
@@ -500,7 +503,7 @@ private fun Small(text: String) {
 
 private fun privilegedLabel(s: PrivilegedBridge.Status) = when (s) {
     PrivilegedBridge.Status.NOT_CONNECTED -> "起動していません"
-    PrivilegedBridge.Status.READY -> "接続中（モニター表示中だけ使います）"
+    PrivilegedBridge.Status.READY -> "接続中（読み取るのはモニター表示中だけです）"
 }
 
 private fun thermalLabel(status: Int) = when (status) {

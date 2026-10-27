@@ -269,7 +269,7 @@ settings/      SettingsActivity と各画面
 backup/        BackupModel, Exporter, Importer
 monitor/       MonitorActivity, MonitorRepository, PrivilegedBridge, AppStats, LoadMetrics
                ProcSnapshot, Temperatures, AppRows                 <- 純粋 Kotlin
-monitor/priv/  PrivilegedService（シェル権限で起動する計測用プロセス。起動部分は未実装）
+monitor/priv/  Starter・PrivilegedService（PC の adb からシェル権限で起動する計測用プロセス）
 ```
 
 ## 15. テスト方針
