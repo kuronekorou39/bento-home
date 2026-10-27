@@ -116,12 +116,13 @@ class SettingsActivity : ComponentActivity() {
                 scope.launch { settingsRepo.update(transform) }
             }
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) {
+                // 上下の領域は最初の描画で読む。設定の読み込みを待ってから読むと、
+                // タイトルバーのある画面では領域の大きさが届かず 0 になる
+                Surface(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                     val s = settings ?: return@Surface
                     Column(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
                             .verticalScroll(rememberScrollState())
                             .padding(16.dp),
                     ) {
