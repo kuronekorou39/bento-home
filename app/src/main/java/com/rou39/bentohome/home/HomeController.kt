@@ -56,6 +56,61 @@ class HomeController(
     /** 選んだアプリを置くページを選ぶ、ホームの縮小表示。 */
     var overviewOpen by mutableStateOf(false)
 
+    /**
+     * ホームで項目を選んでまとめて動かしている最中か。選んでいる間は、タップ・長押しで選択を切り替え、
+     * 長押しのまま動かすと選んだ項目をまとめて運ぶ。
+     */
+    var selectingItems by mutableStateOf(false)
+        private set
+
+    /** ホームで選んでいる項目（選んだ順）。 */
+    val selectedItems = mutableStateListOf<Long>()
+
+    /** 選んだ項目を運ぶページを選ぶ、ホームの縮小表示。 */
+    var moveOverviewOpen by mutableStateOf(false)
+
+    fun startItemSelection(itemId: Long? = null) {
+        if (locked) return
+        backgroundMenuAt = null
+        resizingItemId = null
+        selectingItems = true
+        if (itemId != null && itemId !in selectedItems) selectedItems += itemId
+    }
+
+    fun toggleItem(itemId: Long) {
+        if (!selectedItems.remove(itemId)) selectedItems += itemId
+    }
+
+    fun clearItemSelection() {
+        selectingItems = false
+        selectedItems.clear()
+        moveOverviewOpen = false
+    }
+
+    /** 追加・移動した項目を光らせる。token が変わるたびに光り直す。 */
+    var pulseIds by mutableStateOf<Set<Long>>(emptySet())
+        private set
+    var pulseToken by mutableStateOf(0)
+        private set
+    private var pulseJob: Job? = null
+
+    fun pulse(ids: Set<Long>) {
+        pulseIds = ids
+        pulseToken++
+        pulseJob?.cancel()
+        pulseJob = scope.launch {
+            delay(PULSE_TOTAL_MS)
+            pulseIds = emptySet()
+        }
+    }
+
+    /**
+     * 運んでいる間、ドックの位置にページの縮小表示を並べるか。ドックに置けないもの
+     * （まとめて運ぶ項目・ウィジェット・フォルダー・ショートカット）のときだけ出す。
+     */
+    val showsPageStrip: Boolean
+        get() = drag.active && (drag.source is DragSource.Items || drag.visual !is DragVisual.App)
+
     fun toggleSelected(app: AppRef) {
         if (!selectedApps.remove(app)) selectedApps += app
     }
@@ -132,6 +187,7 @@ class HomeController(
         partitionPickerOpen = false
         pageManagerOpen = false
         clearSelection()
+        clearItemSelection()
         drag.clear()
         measureJob?.cancel()
         measureResult = null
@@ -180,6 +236,7 @@ class HomeController(
 
     fun openDrawer() {
         backgroundMenuAt = null
+        clearItemSelection()
         drawerOpen = true
     }
 
@@ -210,24 +267,41 @@ class HomeController(
         onDragStarted: () -> Unit,
         fromDrawer: Boolean = false,
         onTap: ((android.graphics.Rect?) -> Unit)? = null,
-    ) = ItemGestureCallbacks(
-        onTap = onTap ?: { bounds -> if (entry != null) vm.launch(entry, bounds) },
-        onLongPress = onLongPress,
-        canDrag = canDrag && !locked,
-        onDragStart = { pointer, grab, size ->
-            onDragStarted()
-            drag.start(source, visual, pointer, grab, size, spanX, spanY, fromDrawer)
-        },
-        onDragMove = { drag.pointer = it },
-        onDragEnd = ::endDrag,
-        onDragCancel = { drag.clear() },
-    )
+    ): ItemGestureCallbacks {
+        // ホームで選んでいる間は、ホームの項目のタップ・長押しで選択を切り替え、運ぶと選んだ項目をまとめて運ぶ
+        val homeItemId = (source as? DragSource.Item)?.itemId
+        val selecting = homeItemId != null && selectingItems && !locked
+        return ItemGestureCallbacks(
+            onTap = when {
+                selecting -> { _ -> toggleItem(homeItemId!!) }
+                onTap != null -> onTap
+                else -> { bounds -> if (entry != null) vm.launch(entry, bounds) }
+            },
+            onLongPress = if (selecting) ({ toggleItem(homeItemId!!) }) else onLongPress,
+            canDrag = canDrag && !locked,
+            onDragStart = { pointer, grab, size ->
+                onDragStarted()
+                val dragSource = if (selecting) {
+                    if (homeItemId!! !in selectedItems) selectedItems += homeItemId
+                    DragSource.Items(selectedItems.toList(), homeItemId)
+                } else {
+                    source
+                }
+                drag.start(dragSource, visual, pointer, grab, size, spanX, spanY, fromDrawer)
+            },
+            onDragMove = { drag.pointer = it },
+            onDragEnd = ::endDrag,
+            onDragCancel = { drag.clear() },
+        )
+    }
 
     fun endDrag() {
         val source = drag.source ?: return
-        vm.drop(source, computeTarget(vm.workspace.value))
+        val placed = vm.drop(source, computeTarget(vm.workspace.value))
         if (drag.fromDrawer) drawerOpen = false
         if (source is DragSource.FolderApp) closeFolder()
+        // まとめて運び終えたら選択を終える。置けなかったときは選んだまま
+        if (source is DragSource.Items && placed) clearItemSelection()
         drag.clear()
     }
 
@@ -235,9 +309,13 @@ class HomeController(
     fun computeTarget(ws: Workspace?): DropTarget {
         if (ws == null || !drag.active) return DropTarget.None
         val p = drag.pointer
+        if (showsPageStrip && geometry.stripArea.contains(p)) {
+            val hit = geometry.stripTiles.entries.firstOrNull { it.value.contains(p) }?.key
+            return hit?.let { DropTarget.Page(it) } ?: DropTarget.None
+        }
         val dock = geometry.dockArea
         if (dockVisible && dock.width > 0f && dock.contains(p)) {
-            if (drag.visual is DragVisual.Widget) return DropTarget.None
+            if (drag.visual is DragVisual.Widget || drag.source is DragSource.Items) return DropTarget.None
             val slotWidth = dock.width / vm.dockSize
             return DropTarget.Dock(((p.x - dock.left) / slotWidth).toInt().coerceIn(0, vm.dockSize - 1))
         }
@@ -261,7 +339,7 @@ class HomeController(
      * @param cx 指の位置（小マス単位）
      */
     private fun mergeTarget(ws: Workspace, pageIndex: Int, cx: Float, cy: Float): DropTarget.Merge? {
-        if (drag.visual !is DragVisual.App) return null
+        if (drag.visual !is DragVisual.App || drag.source is DragSource.Items) return null
         val page = ws.pageAt(pageIndex) ?: return null
         val draggedId = (drag.source as? DragSource.Item)?.itemId
         val hit = ws.itemsOn(page.id).firstOrNull { item ->
@@ -309,6 +387,9 @@ class HomeController(
         const val MEASURE_SETTLE_MS = 500L
         const val MEASURE_PHASE_MS = 2_000L
         const val MEASURE_CYCLES = 3
+
+        /** 追加・移動した項目を光らせ終えるまでの時間（[PulseRing] の2回分と、表示を待つ時間）。 */
+        const val PULSE_TOTAL_MS = 2_400L
 
         /** 重ねてまとめる判定から外す、項目の端の幅（項目の大きさに対する比率）。 */
         const val MERGE_EDGE = 0.2f

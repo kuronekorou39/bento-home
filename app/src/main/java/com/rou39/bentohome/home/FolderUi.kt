@@ -167,6 +167,7 @@ fun HomeFolderCell(
                 menuOpen = false
                 controller.openFolder(item.id, rename = true)
             })
+            SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ホームから削除（中のアプリも）") }, onClick = {
                     menuOpen = false

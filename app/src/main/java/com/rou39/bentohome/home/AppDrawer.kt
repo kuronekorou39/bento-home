@@ -58,6 +58,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.layout.AppRef
+import com.rou39.bentohome.layout.ItemContent
+import com.rou39.bentohome.layout.Workspace
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
 import com.rou39.bentohome.data.DrawerSort
 import com.rou39.bentohome.usage.GrayReason
 import com.rou39.bentohome.usage.RankInput
@@ -66,6 +70,26 @@ import com.rou39.bentohome.usage.UsagePolicy
 private val DRAWER_ICON_SIZE = 52.dp
 private val SELECTED_COLOR = Color.White.copy(alpha = 0.16f)
 private const val HIDDEN_ALPHA = 0.45f
+private val HOME_MARK_COLOR = Color.White.copy(alpha = 0.8f)
+
+/**
+ * アプリがホームのどこにあるか（一覧の印とメニューに使う）。ページ・フォルダーの中・ドックを見る。
+ * 同じアプリが何か所かにあれば、前のページの上の行から見て最初の1か所。
+ */
+fun homePlacements(ws: Workspace): Map<AppRef, String> {
+    val result = HashMap<AppRef, String>()
+    ws.orderedPages.forEachIndexed { i, page ->
+        for (item in ws.itemsOn(page.id).sortedWith(compareBy({ it.rect.y }, { it.rect.x }))) {
+            when (val c = item.content) {
+                is ItemContent.App -> result.putIfAbsent(c.app, "ホームの${i + 1}ページ目")
+                is ItemContent.Folder -> c.apps.forEach { result.putIfAbsent(it, "ホームの${i + 1}ページ目のフォルダー「${c.title}」") }
+                is ItemContent.Widget, is ItemContent.Shortcut -> Unit
+            }
+        }
+    }
+    for (slot in ws.dock.sortedBy { it.slot }) result.putIfAbsent(slot.app, "ドック")
+    return result
+}
 
 /**
  * アプリ一覧（docs/design.md §13）。検索は一覧の中だけで使い、自動でフォーカスしない。
@@ -78,6 +102,8 @@ fun AppDrawer(
     apps: List<AppEntry>,
     /** アプリ一覧に出さないアプリ（plan.md §10）。下のボタンで一時的に表示できる。 */
     hidden: Set<AppRef>,
+    /** ホームに置いたアプリと、その場所（[homePlacements]）。 */
+    placements: Map<AppRef, String>,
     /**
      * ホームが2ページ以上か。そのときは長押しでつままずに選択し、まとめて「ホームに追加」する（plan.md §10）。
      * 運びながらページ送りを待たなくて済むように。
@@ -94,6 +120,8 @@ fun AppDrawer(
     // 一覧を閉じたら選択を捨てる
     DisposableEffect(Unit) { onDispose { controller.clearSelection() } }
     var showHidden by remember { mutableStateOf(false) }
+    // ホームにまだ置いていないアプリだけを出す
+    var offHomeOnly by remember { mutableStateOf(false) }
     val hiddenCount = apps.count { it.ref in hidden }
     val listed = remember(apps, hidden, showHidden) { if (showHidden) apps else apps.filter { it.ref !in hidden } }
     // remember の計算は並び順を切り替えたときだけ走る。その時点の使用記録で順番を決める
@@ -119,9 +147,9 @@ fun AppDrawer(
         frozenOrder.mapNotNull(byRef::get) + listed.filter { it.ref !in known }
     }
     // 表示名と元の名前のどちらでも見つかるようにする
-    val filtered = remember(ordered, query) {
+    val filtered = remember(ordered, query, offHomeOnly, placements) {
         val q = query.trim()
-        if (q.isEmpty()) {
+        val matched = if (q.isEmpty()) {
             ordered
         } else {
             ordered.filter {
@@ -129,6 +157,7 @@ fun AppDrawer(
                     it.packageName.contains(q, ignoreCase = true)
             }
         }
+        if (offHomeOnly) matched.filter { it.ref !in placements } else matched
     }
     // 並び順を切り替えたら先頭へ戻す。戻さないと、上に見えていたアプリの位置を保とうとして、
     // 並べ替えた後の先頭（よく使うアプリや区切り）が画面の外に隠れる
@@ -206,6 +235,11 @@ fun AppDrawer(
                     label = { Text(option.label, fontSize = 12.sp) },
                 )
             }
+            FilterChip(
+                selected = offHomeOnly,
+                onClick = { offHomeOnly = !offHomeOnly },
+                label = { Text("ホームに無い", fontSize = 12.sp) },
+            )
             Text("${filtered.size} 件", color = Color.LightGray, fontSize = 12.sp, maxLines = 1, softWrap = false)
         }
         LazyVerticalGrid(
@@ -223,6 +257,7 @@ fun AppDrawer(
             items(recorded, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
                 DrawerTile(
                     controller, entry, badgeFor(entry), grayFor(entry),
+                    placement = placements[entry.ref],
                     isHidden = entry.ref in hidden,
                     selectMode = selectMode,
                     selected = entry.ref in controller.selectedApps,
@@ -233,6 +268,7 @@ fun AppDrawer(
                 items(rest, key = { "${it.ref.component}#${it.ref.profileSerial}" }) { entry ->
                     DrawerTile(
                         controller, entry, badgeFor(entry), grayFor(entry),
+                        placement = placements[entry.ref],
                         isHidden = entry.ref in hidden,
                         selectMode = selectMode,
                         selected = entry.ref in controller.selectedApps,
@@ -257,6 +293,8 @@ private fun DrawerTile(
     entry: AppEntry,
     badge: BadgeDisplay?,
     gray: GrayReason?,
+    /** ホームでの場所。ホームに無ければ null。 */
+    placement: String?,
     isHidden: Boolean,
     selectMode: Boolean,
     selected: Boolean,
@@ -278,7 +316,13 @@ private fun DrawerTile(
             .padding(2.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(if (selected) SELECTED_COLOR else Color.Transparent)
-            .semantics { if (selectMode) stateDescription = if (selected) "選択中" else "未選択" }
+            .semantics {
+                val states = listOfNotNull(
+                    if (selectMode) (if (selected) "選択中" else "未選択") else null,
+                    if (placement != null) "ホームにあり" else null,
+                )
+                if (states.isNotEmpty()) stateDescription = states.joinToString("、")
+            }
             .launcherItemGestures(
                 entry.ref,
                 controller.itemCallbacks(
@@ -305,6 +349,7 @@ private fun DrawerTile(
             modifier = Modifier.padding(horizontal = 4.dp),
             grayLevel = gray?.level ?: 0,
         )
+        if (placement != null) HomeMark(Modifier.align(Alignment.TopStart).padding(8.dp))
         if (selected) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -323,10 +368,16 @@ private fun DrawerTile(
                 controller.drawerMenuRef = null
             },
         ) {
+            if (placement != null) {
+                DropdownMenuItem(text = { Text("${placement}にあります", fontSize = 12.sp) }, onClick = {}, enabled = false)
+                HorizontalDivider()
+            }
             if (!controller.locked && !selectMode) {
                 DropdownMenuItem(text = { Text("ホームに追加") }, onClick = {
                     menuOpen = false
                     controller.vm.addAppToHome(entry.ref)
+                    // 一覧を閉じて、置いた場所を光らせて見せる
+                    controller.drawerOpen = false
                 })
             }
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
@@ -359,6 +410,26 @@ private fun SelectionBar(controller: HomeController) {
             onClick = { controller.overviewOpen = true },
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) { Text("ホームに追加（${count}個）", fontSize = 16.sp) }
+    }
+}
+
+/** ホームに置いてあるアプリの印（小さな家の形）。 */
+@Composable
+private fun HomeMark(modifier: Modifier = Modifier) {
+    Canvas(modifier.size(14.dp)) {
+        val w = size.width
+        val h = size.height
+        val house = Path().apply {
+            moveTo(w * 0.5f, h * 0.06f)
+            lineTo(w * 0.96f, h * 0.5f)
+            lineTo(w * 0.82f, h * 0.5f)
+            lineTo(w * 0.82f, h * 0.94f)
+            lineTo(w * 0.18f, h * 0.94f)
+            lineTo(w * 0.18f, h * 0.5f)
+            lineTo(w * 0.04f, h * 0.5f)
+            close()
+        }
+        drawPath(house, HOME_MARK_COLOR)
     }
 }
 

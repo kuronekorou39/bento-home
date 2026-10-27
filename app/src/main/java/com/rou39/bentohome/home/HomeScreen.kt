@@ -45,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -118,6 +119,10 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 private val DOCK_HEIGHT = 88.dp
+private val PAGE_INDICATOR_HEIGHT = 28.dp
+
+/** ドックを隠しているときの、ページの縮小表示の帯の高さ。 */
+private val STRIP_HEIGHT_NO_DOCK = 96.dp
 
 /** 画面端でこの時間止まると、ドラッグ中にページを送る。 */
 private const val EDGE_FLIP_DELAY_MS = 600L
@@ -202,9 +207,15 @@ fun HomeScreen(
 
     val wsState = rememberUpdatedState(workspace)
     val target by remember { derivedStateOf { controller.computeTarget(wsState.value) } }
-    val targetValid by remember {
-        derivedStateOf { drag.source?.let { vm.canDrop(it, target) } ?: false }
+    // 置き先が変わったときだけ計算し直す（押し出しの計算を含む）
+    val preview by remember {
+        derivedStateOf { drag.source?.let { vm.previewDrop(it, target, drag.spanX, drag.spanY) } }
     }
+    val targetValid = preview?.valid ?: false
+    val hoveredStripPage by remember { derivedStateOf { (target as? DropTarget.Page)?.pageIndex } }
+    // 一覧で「ホームにある」印を付けるのに使う
+    val placements = remember(workspace) { homePlacements(workspace) }
+    val pageAspect = geometry.gridArea.let { if (it.height > 0f) it.width / it.height else DEFAULT_PAGE_ASPECT }
 
     LaunchedEffect(homeResetCount) { controller.resetForHome() }
     LaunchedEffect(pagerState) {
@@ -214,7 +225,15 @@ fun HomeScreen(
         }
     }
     LaunchedEffect(vm) { vm.focusPage.collect { pagerState.animateScrollToPage(it) } }
+    LaunchedEffect(vm) { vm.pulse.collect(controller::pulse) }
+    // 消えた項目は選択から外す
+    LaunchedEffect(workspace) {
+        val ids = workspace.items.mapTo(HashSet()) { it.id }
+        controller.selectedItems.retainAll(ids)
+    }
+    LaunchedEffect(settings.layoutLocked) { if (settings.layoutLocked) controller.clearItemSelection() }
     EdgeFlipEffect(controller)
+    PageJumpEffect(controller, hoveredStripPage)
     WallpaperScrollEffect(pagerState, pages.size)
 
     val snackbar = remember { SnackbarHostState() }
@@ -229,6 +248,8 @@ fun HomeScreen(
     BackHandler(enabled = controller.drawerOpen) { controller.drawerOpen = false }
     BackHandler(enabled = controller.selectedApps.isNotEmpty()) { controller.clearSelection() }
     BackHandler(enabled = controller.overviewOpen) { controller.overviewOpen = false }
+    BackHandler(enabled = controller.selectingItems) { controller.clearItemSelection() }
+    BackHandler(enabled = controller.moveOverviewOpen) { controller.moveOverviewOpen = false }
     BackHandler(enabled = controller.pageManagerOpen) { controller.pageManagerOpen = false }
     BackHandler(enabled = controller.backgroundMenuAt != null) { controller.backgroundMenuAt = null }
     BackHandler(enabled = controller.resizingItemId != null) { controller.resizingItemId = null }
@@ -283,11 +304,12 @@ fun HomeScreen(
                     val pageVisible by remember(index) {
                         derivedStateOf { pagerState.layoutInfo.visiblePagesInfo.any { it.index == index } }
                     }
-                    val highlight = when (val t = target) {
-                        is DropTarget.Cell -> CellRect(t.x, t.y, drag.spanX, drag.spanY).takeIf { t.pageIndex == index }
+                    val onThisPage = (target as? DropTarget.Cell)?.pageIndex == index
+                    val highlights = when (val t = target) {
+                        is DropTarget.Cell -> if (onThisPage) preview?.rects.orEmpty() else emptyList()
                         // まとめ先は、その項目の範囲を示す
-                        is DropTarget.Merge -> workspace.item(t.itemId)?.rect?.takeIf { t.pageIndex == index }
-                        else -> null
+                        is DropTarget.Merge -> listOfNotNull(workspace.item(t.itemId)?.rect?.takeIf { t.pageIndex == index })
+                        else -> emptyList()
                     }
                     WorkspacePage(
                         controller = controller,
@@ -297,8 +319,9 @@ fun HomeScreen(
                         hostIds = hostIds,
                         badgeFor = badgeFor,
                         grayFor = homeGrayFor,
-                        highlight = highlight,
+                        highlights = highlights,
                         highlightValid = targetValid,
+                        displaced = if (onThisPage && targetValid) preview?.displaced.orEmpty() else emptyList(),
                         widgetsVisible = pageVisible && !controller.drawerOpen,
                     )
                 }
@@ -331,6 +354,7 @@ fun HomeScreen(
                 controller = controller,
                 apps = apps,
                 hidden = remember(appearances) { appearances.filterValues { it.hidden }.keys },
+                placements = placements,
                 multiPage = pages.size >= 2,
                 badgeFor = badgeFor,
                 grayFor = drawerGrayFor,
@@ -346,13 +370,12 @@ fun HomeScreen(
         }
 
         if (controller.overviewOpen && controller.drawerOpen) {
-            val area = geometry.gridArea
             HomeOverview(
                 controller = controller,
                 workspace = workspace,
                 byRef = byRef,
-                count = controller.selectedApps.size,
-                aspect = if (area.height > 0f) area.width / area.height else DEFAULT_PAGE_ASPECT,
+                title = "${controller.selectedApps.size}個をどのページに置きますか",
+                aspect = pageAspect,
                 onPick = { pageIndex ->
                     vm.addAppsToPage(controller.selectedApps.toList(), pageIndex)
                     controller.clearSelection()
@@ -371,6 +394,33 @@ fun HomeScreen(
             LaunchedEffect(Unit) { controller.closeFolder() }
         }
 
+        if (controller.selectingItems && !drag.active) {
+            HomeSelectionBar(controller, Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing))
+        }
+        if (controller.showsPageStrip) {
+            PageStrip(
+                controller, workspace, byRef, pageAspect, hoveredStripPage,
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .height(if (settings.dockVisible) DOCK_HEIGHT + PAGE_INDICATOR_HEIGHT else STRIP_HEIGHT_NO_DOCK),
+            )
+        }
+        if (controller.moveOverviewOpen) {
+            HomeOverview(
+                controller = controller,
+                workspace = workspace,
+                byRef = byRef,
+                title = "${controller.selectedItems.size}個をどのページへ移しますか",
+                aspect = pageAspect,
+                onPick = { pageIndex ->
+                    vm.moveItemsToPage(controller.selectedItems.toList(), pageIndex)
+                    controller.clearItemSelection()
+                },
+                onDismiss = { controller.moveOverviewOpen = false },
+            )
+        }
+
         DragGhost(controller, byRef)
 
         controller.backgroundMenuAt?.let { at ->
@@ -381,6 +431,9 @@ fun HomeScreen(
                             controller.backgroundMenuAt = null
                             onOpenWidgetPicker()
                         })
+                        if (workspace.items.isNotEmpty()) {
+                            DropdownMenuItem(text = { Text("選択して移動") }, onClick = { controller.startItemSelection() })
+                        }
                     }
                     if (pages.size >= 2) {
                         DropdownMenuItem(text = { Text("ページの整理") }, onClick = {
@@ -419,12 +472,11 @@ fun HomeScreen(
         }
 
         if (controller.pageManagerOpen) {
-            val area = geometry.gridArea
             PageManager(
                 controller = controller,
                 workspace = workspace,
                 byRef = byRef,
-                aspect = if (area.height > 0f) area.width / area.height else DEFAULT_PAGE_ASPECT,
+                aspect = pageAspect,
                 onDismiss = { controller.pageManagerOpen = false },
             )
         }
@@ -587,8 +639,10 @@ private fun WorkspacePage(
     hostIds: Set<Int>,
     badgeFor: (AppEntry?) -> BadgeDisplay?,
     grayFor: (AppEntry?) -> GrayReason?,
-    highlight: CellRect?,
+    highlights: List<CellRect>,
     highlightValid: Boolean,
+    /** 置くと押し出される項目（動いた後の位置）。元の位置は薄くし、動いた先に薄く示す。 */
+    displaced: List<WorkspaceItem>,
     widgetsVisible: Boolean,
 ) {
     val vm = controller.vm
@@ -624,10 +678,16 @@ private fun WorkspacePage(
         if (controller.drag.active) DragGuide(grid)
         if (page != null) {
             PartitionLayer(page.partition, maxWidth, maxHeight)
+            val displacedIds = displaced.mapTo(HashSet()) { it.id }
             for (item in workspace.itemsOn(page.id)) {
                 key(item.id) {
-                    val dragged = (controller.drag.source as? DragSource.Item)?.itemId == item.id
-                    Box(Modifier.cellPlacement(item.rect, cellW, cellH).alpha(if (dragged) 0.3f else 1f)) {
+                    val dragged = when (val source = controller.drag.source) {
+                        is DragSource.Item -> source.itemId == item.id
+                        is DragSource.Items -> item.id in source.ids
+                        else -> false
+                    }
+                    val faded = dragged || item.id in displacedIds
+                    Box(Modifier.cellPlacement(item.rect, cellW, cellH).alpha(if (faded) 0.3f else 1f)) {
                         when (val content = item.content) {
                             is ItemContent.App ->
                                 HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor, grayFor)
@@ -637,6 +697,8 @@ private fun WorkspacePage(
                                 HomeFolderCell(controller, item, content, byRef, iconSize, badgeFor)
                             is ItemContent.Shortcut -> HomeShortcutCell(controller, item, content, iconSize)
                         }
+                        if (controller.selectingItems && item.id in controller.selectedItems) SelectedMark()
+                        if (item.id in controller.pulseIds) PulseRing(controller.pulseToken)
                     }
                 }
             }
@@ -645,16 +707,17 @@ private fun WorkspacePage(
             if (resizing != null && resizingWidget != null) {
                 val info = remember(resizingWidget.widgetId) { vm.widgetHost.info(resizingWidget.widgetId) }
                 if (info != null) {
-                    ResizeFrame(controller, resizing, vm.resizeLimits(info), info.resizeMode, cellW, cellH)
+                    ResizeFrame(controller, resizing, vm.resizeLimits(info), info.resizeMode, cellW, cellH, byRef)
                 }
             }
         }
 
+        for (item in displaced) DisplacedGhost(controller, item, byRef, cellW, cellH)
         // 置き先の枠は項目より上に描く（ウィジェットに隠れないように）
-        if (highlight != null) {
+        for (rect in highlights) {
             Box(
                 Modifier
-                    .cellPlacement(highlight, cellW, cellH)
+                    .cellPlacement(rect, cellW, cellH)
                     .padding(2.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(if (highlightValid) OK_COLOR else NG_COLOR),
@@ -662,6 +725,33 @@ private fun WorkspacePage(
         }
     }
 }
+
+/** 押し出された項目の、動いた後の位置。点線の代わりに薄い枠と薄いアイコンで示す。 */
+@Composable
+private fun DisplacedGhost(
+    controller: HomeController,
+    item: WorkspaceItem,
+    byRef: Map<AppRef, AppEntry>,
+    cellW: Dp,
+    cellH: Dp,
+) {
+    val w = cellW * item.rect.width
+    val h = cellH * item.rect.height
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .cellPlacement(item.rect, cellW, cellH)
+            .padding(2.dp)
+            .border(1.5.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .alpha(GHOST_ALPHA),
+    ) {
+        MiniItem(controller, item, byRef, min(w, h) * GHOST_ICON_RATIO)
+    }
+}
+
+private const val GHOST_ALPHA = 0.55f
+private const val GHOST_ICON_RATIO = 0.6f
 
 /** 運んでいる間の目安。マス目の線（薄い）と、半マスの交点の点（さらに薄い）。 */
 @Composable
@@ -711,6 +801,7 @@ private fun ResizeFrame(
     resizeMode: Int,
     cellW: Dp,
     cellH: Dp,
+    byRef: Map<AppRef, AppEntry>,
 ) {
     val vm = controller.vm
     val grid = vm.currentGrid()
@@ -719,7 +810,10 @@ private fun ResizeFrame(
     val stepW = with(density) { cellW.toPx() } * sub
     val stepH = with(density) { cellH.toPx() } * sub
     var preview by remember(item.rect) { mutableStateOf(item.rect) }
-    val valid = preview == item.rect || vm.canResize(item.id, preview)
+    // 重なる項目は押し出す。押し出す先が無い大きさだけ赤にする
+    val result = remember(preview, item.rect) { if (preview == item.rect) null else vm.previewResize(item.id, preview) }
+    val valid = result?.valid ?: true
+    if (valid) result?.displaced?.forEach { DisplacedGhost(controller, it, byRef, cellW, cellH) }
 
     fun rectFor(edge: Edge, drag: Offset): CellRect {
         val start = item.rect
@@ -823,6 +917,7 @@ private fun HomeAppCell(
         )
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
+            SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
                     menuOpen = false
@@ -893,24 +988,23 @@ private fun HomeWidgetCell(
     val label = remember(info) {
         info?.loadLabel(vm.getApplication<android.app.Application>().packageManager) ?: "ウィジェット"
     }
+    val callbacks = controller.itemCallbacks(
+        source = DragSource.Item(item.id),
+        visual = DragVisual.Widget(label),
+        spanX = item.rect.width,
+        spanY = item.rect.height,
+        entry = null,
+        canDrag = controller.resizingItemId != item.id,
+        onLongPress = { menuOpen = true },
+        onDragStarted = { menuOpen = false },
+    )
+    // ホームで選んでいる間は、ウィジェットの中身を操作させず、アイコンと同じように選ぶ・運ぶ
+    val selecting = controller.selectingItems && !controller.locked
     Box(
         Modifier
             .fillMaxSize()
             .padding(4.dp)
-            .widgetGestures(
-                item.id,
-                controller.itemCallbacks(
-                    source = DragSource.Item(item.id),
-                    visual = DragVisual.Widget(label),
-                    spanX = item.rect.width,
-                    spanY = item.rect.height,
-                    entry = null,
-                    canDrag = controller.resizingItemId != item.id,
-                    onLongPress = { menuOpen = true },
-                    onDragStarted = { menuOpen = false },
-                ),
-                controller.pagerDrag,
-            ),
+            .then(if (selecting) Modifier else Modifier.widgetGestures(item.id, callbacks, controller.pagerDrag)),
     ) {
         if (info == null) {
             Box(
@@ -928,6 +1022,7 @@ private fun HomeWidgetCell(
         } else {
             WidgetHostSurface(controller, widget.widgetId, visible && controller.hiddenWidgetId != widget.widgetId)
         }
+        if (selecting) Box(Modifier.matchParentSize().launcherItemGestures(item.id, callbacks))
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val reconfigurable = info != null && info.configure != null &&
                 info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE != 0
@@ -946,6 +1041,7 @@ private fun HomeWidgetCell(
             if (controller.locked) {
                 DropdownMenuItem(text = { Text("配置はロック中です") }, onClick = { menuOpen = false })
             } else {
+                SelectMenuItem(controller, item.id, close = { menuOpen = false })
                 if (info != null) {
                     if (resizable(info, vm.resizeLimits(info))) {
                         DropdownMenuItem(text = { Text("サイズ変更") }, onClick = {
@@ -985,7 +1081,7 @@ private fun WidgetHostSurface(controller: HomeController, widgetId: Int, visible
 
 @Composable
 private fun PageIndicator(count: Int, current: Int, onOpenDrawer: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(28.dp)) {
+    Box(Modifier.fillMaxWidth().height(PAGE_INDICATOR_HEIGHT)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1132,6 +1228,18 @@ private fun DragGhost(controller: HomeController, byRef: Map<AppRef, AppEntry>) 
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp)).background(Color(0x99FFFFFF)),
             ) { Text(visual.label, color = Color.Black) }
+        }
+        // まとめて運んでいるときは個数を添える
+        val count = (drag.source as? DragSource.Items)?.ids?.size ?: 0
+        if (count > 1) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            ) { Text("$count", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp) }
         }
     }
 }

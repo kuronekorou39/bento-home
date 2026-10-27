@@ -21,6 +21,7 @@ import com.rou39.bentohome.layout.LayoutEngine
 import com.rou39.bentohome.layout.Page
 import com.rou39.bentohome.layout.Partition
 import com.rou39.bentohome.layout.Placement
+import com.rou39.bentohome.layout.Pushed
 import com.rou39.bentohome.layout.ResizeLimits
 import com.rou39.bentohome.layout.WidgetSizing
 import com.rou39.bentohome.layout.Workspace
@@ -42,6 +43,20 @@ import kotlinx.coroutines.launch
 
 /** 取り消し可能な操作の通知。message があればスナックバーを出す。 */
 data class UndoState(val message: String?, val token: Long)
+
+/**
+ * 運んでいる間の置き先の予告（ホームの1ページ分）。
+ * @param rects 運んだ項目が入る範囲。置けないときも、置こうとしている範囲を示す
+ * @param displaced 押し出されて動く項目（動いた後の位置）
+ */
+data class DropPreview(
+    val valid: Boolean,
+    val rects: List<CellRect> = emptyList(),
+    val displaced: List<WorkspaceItem> = emptyList(),
+)
+
+/** マス目への置き方。base は運ぶ元を外した配置、movers は置いた後の項目。 */
+private data class CellPlan(val base: Workspace, val pageId: Long, val movers: List<WorkspaceItem>)
 
 fun LauncherSettings.grid() = GridSpec(baseColumns, baseRows, LauncherSettings.SUBDIVISIONS)
 
@@ -94,6 +109,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     /** 操作の結果を見せるために表示したいページ。 */
     private val _focusPage = MutableSharedFlow<Int>(extraBufferCapacity = 1)
     val focusPage: SharedFlow<Int> = _focusPage.asSharedFlow()
+
+    /** 追加・移動した項目。ホームで短く光らせて場所を知らせる（メッセージの代わり）。 */
+    private val _pulse = MutableSharedFlow<Set<Long>>(extraBufferCapacity = 1)
+    val pulse: SharedFlow<Set<Long>> = _pulse.asSharedFlow()
 
     /** ホームから外したショートカットの提供元。取り消しの猶予が過ぎたら OS 側の固定も外す。 */
     private val pendingUnpins = mutableSetOf<Pair<String, Long>>()
@@ -176,14 +195,25 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- ドラッグ＆ドロップ ----
 
-    fun canDrop(source: DragSource, target: DropTarget): Boolean {
-        val ws = _workspace.value ?: return false
-        return computeDrop(ws, source, target) != null
+    /**
+     * 置き先の予告。マス目なら、入る範囲と押し出される項目も返す。
+     * spanX・spanY は置けないときに示す範囲の大きさ（運んでいる項目の大きさ）。
+     */
+    fun previewDrop(source: DragSource, target: DropTarget, spanX: Int, spanY: Int): DropPreview {
+        val ws = _workspace.value ?: return DropPreview(false)
+        if (target is DropTarget.Page) return DropPreview(true)
+        if (target !is DropTarget.Cell) return DropPreview(computeDrop(ws, source, target) != null)
+        val fallback = listOf(CellRect(target.x, target.y, spanX, spanY))
+        val plan = planCell(ws, source, target) ?: return DropPreview(false, fallback)
+        val rects = plan.movers.map { it.rect }
+        val pushed = LayoutEngine.placeWithPush(plan.base, plan.pageId, plan.movers) ?: return DropPreview(false, rects)
+        return DropPreview(true, rects, pushed.displaced.mapNotNull(pushed.workspace::item))
     }
 
     /** @return 置けたら true。置けなければ配置は変わらない。 */
     fun drop(source: DragSource, target: DropTarget): Boolean {
         val ws = _workspace.value ?: return false
+        if (target is DropTarget.Page) return dropOnPage(ws, source, target.pageIndex)
         val next = computeDrop(ws, source, target)
         if (next == null) {
             Log.d(TAG, "drop rejected: $source -> $target")
@@ -193,9 +223,63 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    /** ページの縮小表示の上で離した。運んだものを、そのページから後ろの空きへ置いて光らせる。 */
+    private fun dropOnPage(ws: Workspace, source: DragSource, pageIndex: Int): Boolean {
+        val (base, carried) = carriedItems(ws, source) ?: return false
+        if (carried.isEmpty()) return false
+        val start = base.pageAt(pageIndex)?.id
+        val (next, ids) = LayoutEngine.placeItems(base, carried, start, gridOf(base))
+        commit(next, focusItemId = ids.first(), pulseItemIds = ids.toSet())
+        return true
+    }
+
+    /** ホームの複数選択から「ページへ移動」で選んだページへ運ぶ。pageIndex が null なら新しいページ。 */
+    fun moveItemsToPage(ids: List<Long>, pageIndex: Int?) {
+        val ws = _workspace.value ?: return
+        val items = ids.mapNotNull(ws::item)
+        if (items.isEmpty()) return
+        val start = pageIndex?.let { ws.pageAt(it)?.id }
+        val (next, placed) = LayoutEngine.placeItems(ws, items, start, gridOf(ws))
+        commit(next, focusItemId = placed.first(), pulseItemIds = placed.toSet())
+    }
+
+    /** 運んでいるものを元の場所から外した配置と、置く項目（大きさだけ意味がある）。 */
+    private fun carriedItems(ws: Workspace, source: DragSource): Pair<Workspace, List<WorkspaceItem>>? {
+        val span = gridOf(ws).iconSpan
+        fun newApp(base: Workspace, app: AppRef) =
+            base to listOf(WorkspaceItem(base.nextItemId(), 0, CellRect(0, 0, span, span), ItemContent.App(app)))
+        return when (source) {
+            is DragSource.Item -> ws.item(source.itemId)?.let { ws to listOf(it) }
+            is DragSource.Items -> ws to source.ids.mapNotNull(ws::item)
+            is DragSource.NewApp -> newApp(ws, source.app)
+            is DragSource.Dock -> ws.dockAt(source.slot)?.let { newApp(LayoutEngine.removeDock(ws, source.slot), it.app) }
+            is DragSource.FolderApp -> newApp(LayoutEngine.removeFromFolder(ws, source.folderItemId, source.app), source.app)
+        }
+    }
+
+    /** マス目へ置くときの、運ぶ元を外した配置と置いた後の項目。押し出しはまだ計算しない。 */
+    private fun planCell(ws: Workspace, source: DragSource, target: DropTarget.Cell): CellPlan? {
+        val (base, page) = pageForIndex(ws, target.pageIndex) ?: return null
+        val span = page.grid.iconSpan
+        fun newApp(from: Workspace, app: AppRef) = CellPlan(
+            from, page.id,
+            listOf(WorkspaceItem(from.nextItemId(), page.id, CellRect(target.x, target.y, span, span), ItemContent.App(app))),
+        )
+        return when (source) {
+            is DragSource.Item -> base.item(source.itemId)?.let {
+                CellPlan(base, page.id, listOf(it.copy(pageId = page.id, rect = it.rect.movedTo(target.x, target.y))))
+            }
+            is DragSource.Items -> LayoutEngine.groupMovers(base, source.ids, source.anchorId, page.id, target.x, target.y)
+                ?.let { CellPlan(base, page.id, it) }
+            is DragSource.Dock -> base.dockAt(source.slot)?.let { newApp(LayoutEngine.removeDock(base, source.slot), it.app) }
+            is DragSource.NewApp -> newApp(base, source.app)
+            is DragSource.FolderApp -> newApp(LayoutEngine.removeFromFolder(base, source.folderItemId, source.app), source.app)
+        }
+    }
+
     private fun computeDrop(ws: Workspace, source: DragSource, target: DropTarget): Workspace? {
         val result = when (target) {
-            DropTarget.None -> return null
+            DropTarget.None, is DropTarget.Page -> return null
             is DropTarget.Dock -> when (source) {
                 is DragSource.Item -> LayoutEngine.moveItemToDock(ws, source.itemId, target.slot, dockSize)
                 is DragSource.Dock -> LayoutEngine.moveDockToDock(ws, source.slot, target.slot, dockSize)
@@ -203,17 +287,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 is DragSource.FolderApp -> LayoutEngine.addAppToDock(
                     LayoutEngine.removeFromFolder(ws, source.folderItemId, source.app), source.app, target.slot, dockSize,
                 )
+                is DragSource.Items -> return null
             }
+            // 重なった項目は近くの空きへ押し出す
             is DropTarget.Cell -> {
-                val (base, page) = pageForIndex(ws, target.pageIndex) ?: return null
-                when (source) {
-                    is DragSource.Item -> LayoutEngine.move(base, source.itemId, page.id, target.x, target.y)
-                    is DragSource.Dock ->
-                        LayoutEngine.moveDockToPage(base, source.slot, page.id, target.x, target.y, base.nextItemId())
-                    is DragSource.NewApp -> addAppAt(base, page, target, source.app)
-                    is DragSource.FolderApp ->
-                        addAppAt(LayoutEngine.removeFromFolder(base, source.folderItemId, source.app), page, target, source.app)
-                }
+                val plan = planCell(ws, source, target) ?: return null
+                return LayoutEngine.placeWithPush(plan.base, plan.pageId, plan.movers)?.workspace
             }
             is DropTarget.Merge -> {
                 val (base, page) = pageForIndex(ws, target.pageIndex) ?: return null
@@ -224,12 +303,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         return (result as? Placement.Ok)?.workspace
-    }
-
-    private fun addAppAt(ws: Workspace, page: Page, target: DropTarget.Cell, app: AppRef): Placement {
-        val span = page.grid.iconSpan
-        val item = WorkspaceItem(ws.nextItemId(), page.id, CellRect(target.x, target.y, span, span), ItemContent.App(app))
-        return LayoutEngine.add(ws, item)
     }
 
     /**
@@ -248,6 +321,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             LayoutEngine.removeFromFolder(ws, source.folderItemId, source.app) to source.app
         }
+        is DragSource.Items -> null
     }
 
     /** 既存ページ、またはページ数と同じ番号なら新しいページ。 */
@@ -264,7 +338,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val (next, itemId) = placeSomewhere(ws, span, span) { pageId, rect ->
             WorkspaceItem(0, pageId, rect, ItemContent.App(app))
         }
-        commit(next, message = "ホームに追加しました", focusItemId = itemId)
+        commit(next, focusItemId = itemId, pulseItemIds = setOfNotNull(itemId))
     }
 
     /**
@@ -276,14 +350,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (apps.isEmpty()) return
         val start = pageIndex?.let { ws.pageAt(it)?.id }
         val (next, ids) = LayoutEngine.placeApps(ws, apps, start, gridOf(ws))
-        val pages = ids.mapNotNull { next.item(it)?.pageId }.distinct()
-        val order = next.orderedPages.map { it.id }
-        val first = order.indexOf(pages.first()) + 1
-        val message = buildString {
-            append("${apps.size}個をホームの${first}ページ目に追加しました")
-            if (pages.size > 1) append("（入りきらない分は後ろのページ）")
-        }
-        commit(next, message = message, focusItemId = ids.first())
+        commit(next, focusItemId = ids.first(), pulseItemIds = ids.toSet())
     }
 
     fun placeNewWidget(widgetId: Int, info: AppWidgetProviderInfo) {
@@ -292,7 +359,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val (next, itemId) = placeSomewhere(ws, spanX, spanY) { pageId, rect ->
             WorkspaceItem(0, pageId, rect, ItemContent.Widget(widgetId, info.provider.flattenToString()))
         }
-        commit(next, message = "ウィジェットを追加しました", focusItemId = itemId)
+        commit(next, focusItemId = itemId, pulseItemIds = setOfNotNull(itemId))
     }
 
     /** バックアップから復元した「再追加が必要」なウィジェットを、新しく割り当てた ID で置き換える。 */
@@ -339,7 +406,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 val ws = _workspace.value ?: return
                 val span = gridOf(ws).iconSpan
                 val (next, itemId) = placeSomewhere(ws, span, span) { pageId, rect -> WorkspaceItem(0, pageId, rect, item.content) }
-                commit(next, message = "ホームに追加しました", focusItemId = itemId)
+                commit(next, focusItemId = itemId, pulseItemIds = setOfNotNull(itemId))
             }
             is PinnedItem.Widget -> {
                 val info = widgetHost.info(item.widgetId)
@@ -397,16 +464,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         commit(LayoutEngine.removeDock(ws, slot), message = "ドックから外しました")
     }
 
-    fun canResize(itemId: Long, rect: CellRect): Boolean {
-        val ws = _workspace.value ?: return false
-        return LayoutEngine.resize(ws, itemId, rect) is Placement.Ok
+    /** リサイズの予告。重なる項目は押し出す。 */
+    fun previewResize(itemId: Long, rect: CellRect): DropPreview {
+        val pushed = resizePushed(itemId, rect) ?: return DropPreview(false, listOf(rect))
+        return DropPreview(true, listOf(rect), pushed.displaced.mapNotNull(pushed.workspace::item))
     }
 
     fun resizeWidget(itemId: Long, rect: CellRect): Boolean {
         val ws = _workspace.value ?: return false
-        val result = LayoutEngine.resize(ws, itemId, rect) as? Placement.Ok ?: return false
-        if (result.workspace != ws) commit(result.workspace)
+        val pushed = resizePushed(itemId, rect) ?: return false
+        if (pushed.workspace != ws) commit(pushed.workspace)
         return true
+    }
+
+    private fun resizePushed(itemId: Long, rect: CellRect): Pushed? {
+        val ws = _workspace.value ?: return null
+        val item = ws.item(itemId) ?: return null
+        return LayoutEngine.placeWithPush(ws, item.pageId, listOf(item.copy(rect = rect)))
     }
 
     /** 提供元のサイズ制約から、リサイズできる範囲を求める。 */
@@ -492,6 +566,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         message: String? = null,
         removedWidgetIds: Set<Int> = emptySet(),
         focusItemId: Long? = null,
+        pulseItemIds: Set<Long> = emptySet(),
     ) {
         val prev = _workspace.value ?: return
         finalizePendingWidgetDeletes()
@@ -505,6 +580,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         pendingWidgetDeletes += removedWidgetIds
         _undo.value = UndoState(message, ++undoToken)
         focusItemId?.let { focusOnItem(pruned, it) }
+        if (pulseItemIds.isNotEmpty()) _pulse.tryEmit(pulseItemIds)
     }
 
     fun undo() {

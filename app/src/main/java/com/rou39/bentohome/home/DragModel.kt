@@ -2,6 +2,7 @@ package com.rou39.bentohome.home
 
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
@@ -20,6 +21,9 @@ sealed interface DragSource {
 
     /** 開いたフォルダーの中から運び出す。 */
     data class FolderApp(val folderItemId: Long, val app: AppRef) : DragSource
+
+    /** ホームで選んだ項目をまとめて運ぶ。anchorId はつまんだ項目で、置き先はこの項目の位置で決める。 */
+    data class Items(val ids: List<Long>, val anchorId: Long) : DragSource
 }
 
 sealed interface DropTarget {
@@ -29,6 +33,12 @@ sealed interface DropTarget {
 
     /** ホームのアプリかフォルダーに重ねて、フォルダーにまとめる（plan.md §10）。 */
     data class Merge(val pageIndex: Int, val itemId: Long) : DropTarget
+
+    /**
+     * 運んでいる間に下に並ぶページの縮小表示（[PageStrip]）。離すとそのページの空きへ置く。
+     * pageIndex がページ数と同じなら、新しいページ。
+     */
+    data class Page(val pageIndex: Int) : DropTarget
     data object None : DropTarget
 }
 
@@ -104,6 +114,10 @@ class DragState {
 class HomeGeometry {
     var gridArea by mutableStateOf(Rect.Zero)
     var dockArea by mutableStateOf(Rect.Zero)
+
+    /** ページの縮小表示の帯と、各ページの縮小表示（キーはページの番号）。帯を出していないときは空。 */
+    var stripArea by mutableStateOf(Rect.Zero)
+    val stripTiles = mutableStateMapOf<Int, Rect>()
 }
 
 /** ホーム・ドック・一覧のアイコンに共通の操作。 */

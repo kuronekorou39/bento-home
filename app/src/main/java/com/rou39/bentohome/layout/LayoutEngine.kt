@@ -1,7 +1,8 @@
 package com.rou39.bentohome.layout
 
 /**
- * 配置の純粋ロジック。衝突するときは自動で押し出さずに拒否する（plan.md §5）。
+ * 配置の純粋ロジック。[move]・[resize] は衝突すると拒否する（plan.md §5）。
+ * ホームでの手動の移動・リサイズは [placeWithPush] で、重なった項目を近くの空きへ押し出す。
  */
 object LayoutEngine {
 
@@ -85,24 +86,139 @@ object LayoutEngine {
      * @return 新しい配置と、置いた項目の ID（アプリの順）
      */
     fun placeApps(ws: Workspace, apps: List<AppRef>, startPageId: Long?, grid: GridSpec): Pair<Workspace, List<Long>> {
-        var current = ws
-        val start = startPageId ?: addPage(current, grid).let { (w, page) -> current = w; page.id }
-        val ids = mutableListOf<Long>()
-        for (app in apps) {
-            val ordered = current.orderedPages
-            val later = ordered.dropWhile { it.id != start }
-            val found = later.firstNotNullOfOrNull { page ->
-                firstFreeCell(current, page.id, grid.iconSpan, grid.iconSpan, grid.subdivisions)?.let { page.id to it }
-            }
-            val (pageId, rect) = found ?: addPage(current, grid).let { (w, page) ->
-                current = w
-                page.id to CellRect(0, 0, grid.iconSpan, grid.iconSpan)
-            }
-            val item = WorkspaceItem(current.nextItemId(), pageId, rect, ItemContent.App(app))
-            current = (add(current, item) as Placement.Ok).workspace
-            ids += item.id
+        val firstId = ws.nextItemId()
+        val items = apps.mapIndexed { i, app ->
+            WorkspaceItem(firstId + i, 0, CellRect(0, 0, grid.iconSpan, grid.iconSpan), ItemContent.App(app))
         }
-        return current to ids
+        return placeItems(ws, items, startPageId, grid)
+    }
+
+    /**
+     * 項目をまとめてページの空きへ置く。既にある項目は元の場所から外して運ぶ（ホームの複数選択の移動）。
+     * 置き方は [placeApps] と同じで、指定したページから後ろへ、無ければ末尾にページを足す。押し出しはしない。
+     * 項目の pageId と位置は無視し、大きさだけ使う。
+     * @return 新しい配置と、置いた項目の ID（渡した順）
+     */
+    fun placeItems(ws: Workspace, items: List<WorkspaceItem>, startPageId: Long?, grid: GridSpec): Pair<Workspace, List<Long>> {
+        val ids = items.map { it.id }.toSet()
+        var current = ws.copy(items = ws.items.filterNot { it.id in ids })
+        val start = startPageId ?: addPage(current, grid).let { (w, page) -> current = w; page.id }
+        for (item in items) {
+            val w = item.rect.width
+            val h = item.rect.height
+            val later = current.orderedPages.dropWhile { it.id != start }
+            val found = later.firstNotNullOfOrNull { page ->
+                firstFreeCell(current, page.id, w, h, grid.subdivisions)?.let { page.id to it }
+            }
+            val (pageId, rect) = found ?: addPage(current, grid).let { (next, page) ->
+                current = next
+                page.id to CellRect(0, 0, w, h)
+            }
+            current = current.copy(items = current.items + item.copy(pageId = pageId, rect = rect))
+        }
+        return current to items.map { it.id }
+    }
+
+    // ---- 押し出し ----
+
+    /**
+     * 運んできた項目（movers）を指定の位置に置き、重なった項目を同じページの近くの空きへ押し出す。
+     * movers は既にある項目（移動・リサイズ）でも新しい項目でもよい。既にある項目の元の場所は空く。
+     * 押し出す項目は大きいものから、元の位置に近い空きへ移す。マス目の揃い方（半マスずれ）を保てる位置を優先する。
+     * @return 置けなければ null（範囲外、運んできた項目どうしの重なり、押し出す先が無い）
+     */
+    fun placeWithPush(ws: Workspace, pageId: Long, movers: List<WorkspaceItem>): Pushed? {
+        val grid = ws.page(pageId)?.grid ?: return null
+        if (movers.isEmpty()) return null
+        if (movers.any { it.pageId != pageId || !it.rect.fitsIn(grid) }) return null
+        for (i in movers.indices) for (j in i + 1 until movers.size) {
+            if (movers[i].rect.overlaps(movers[j].rect)) return null
+        }
+        val moverIds = movers.map { it.id }.toSet()
+        val onPage = ws.items.filter { it.pageId == pageId && it.id !in moverIds }
+        val (hit, stay) = onPage.partition { o -> movers.any { it.rect.overlaps(o.rect) } }
+        val occupied = (movers.map { it.rect } + stay.map { it.rect }).toMutableList()
+        val moved = HashMap<Long, CellRect>()
+        val order = hit.sortedWith(compareByDescending<WorkspaceItem> { it.rect.width * it.rect.height }.thenBy { it.rect.y }.thenBy { it.rect.x })
+        for (item in order) {
+            val rect = nearestFree(grid, item.rect, occupied) ?: return null
+            occupied += rect
+            moved[item.id] = rect
+        }
+        val byId = movers.associateBy { it.id }
+        val existing = ws.items.map { item ->
+            byId[item.id] ?: moved[item.id]?.let { item.copy(rect = it) } ?: item
+        }
+        val known = ws.items.map { it.id }.toSet()
+        return Pushed(ws.copy(items = existing + movers.filter { it.id !in known }), moved.keys)
+    }
+
+    /**
+     * ホームで選んだ項目をまとめて運ぶときの置き場所。つまんだ項目（anchor）の左上が (x, y) に来るよう、並びを保って動かす。
+     * 並び全体がページからはみ出す位置なら、収まるところまで寄せる。
+     * 別々のページから選んで並びが重なるときは、anchor だけ指定の位置に置き、残りはその近くの空きへ並べる。
+     * @return 運んだ後の項目（まだ配置には反映していない）。並べる空きが無ければ null
+     */
+    fun groupMovers(ws: Workspace, ids: List<Long>, anchorId: Long, pageId: Long, x: Int, y: Int): List<WorkspaceItem>? {
+        val grid = ws.page(pageId)?.grid ?: return null
+        val anchor = ws.item(anchorId) ?: return null
+        val items = ids.distinct().mapNotNull(ws::item)
+        val rel = items.map { it to it.rect.copy(x = it.rect.x - anchor.rect.x, y = it.rect.y - anchor.rect.y) }
+        val minX = rel.minOf { it.second.x }
+        val minY = rel.minOf { it.second.y }
+        val maxRight = rel.maxOf { it.second.right }
+        val maxBottom = rel.maxOf { it.second.bottom }
+        val ax = x.coerceAtMost(grid.columns - maxRight).coerceAtLeast(-minX)
+        val ay = y.coerceAtMost(grid.rows - maxBottom).coerceAtLeast(-minY)
+        val formation = rel.map { (item, r) -> item.copy(pageId = pageId, rect = r.copy(x = r.x + ax, y = r.y + ay)) }
+        val overlapping = formation.indices.any { i ->
+            (i + 1 until formation.size).any { j -> formation[i].rect.overlaps(formation[j].rect) }
+        }
+        if (!overlapping) return formation
+
+        // 並びが重なる: anchor を置き、残りは押し出さずに近くの空きへ
+        val anchorRect = anchor.rect.copy(
+            x = x.coerceIn(0, (grid.columns - anchor.rect.width).coerceAtLeast(0)),
+            y = y.coerceIn(0, (grid.rows - anchor.rect.height).coerceAtLeast(0)),
+        )
+        val ids0 = items.map { it.id }.toSet()
+        val occupied = ws.itemsOn(pageId).filter { it.id !in ids0 }.map { it.rect }.toMutableList()
+        occupied += anchorRect
+        val result = mutableListOf(anchor.copy(pageId = pageId, rect = anchorRect))
+        val pageOrder = ws.orderedPages.mapIndexed { i, p -> p.id to i }.toMap()
+        val rest = formation.filter { it.id != anchorId }
+            .sortedWith(compareBy({ pageOrder[ws.item(it.id)?.pageId] ?: 0 }, { it.rect.y }, { it.rect.x }))
+        for (item in rest) {
+            val rect = nearestFree(grid, item.rect, occupied) ?: return null
+            occupied += rect
+            result += item.copy(rect = rect)
+        }
+        return result
+    }
+
+    /**
+     * want に近い空き。まず want と同じマス目の揃い方の位置から探し、無ければ小マス単位で探す。
+     * 距離が同じなら上の行、同じ行なら左を選ぶ。
+     */
+    private fun nearestFree(grid: GridSpec, want: CellRect, occupied: List<CellRect>): CellRect? {
+        fun search(sameAlignment: Boolean): CellRect? {
+            var best: CellRect? = null
+            var bestDistance = Int.MAX_VALUE
+            for (y in 0..grid.rows - want.height) for (x in 0..grid.columns - want.width) {
+                if (sameAlignment && ((x - want.x) % grid.subdivisions != 0 || (y - want.y) % grid.subdivisions != 0)) continue
+                val rect = CellRect(x, y, want.width, want.height)
+                if (occupied.any { it.overlaps(rect) }) continue
+                val dx = x - want.x
+                val dy = y - want.y
+                val distance = dx * dx + dy * dy
+                if (distance < bestDistance) {
+                    best = rect
+                    bestDistance = distance
+                }
+            }
+            return best
+        }
+        return search(sameAlignment = true) ?: search(sameAlignment = false)
     }
 
     /** ページの順番を変える（plan.md §10）。toIndex は並べ替えた後の位置。 */
@@ -321,6 +437,13 @@ object LayoutEngine {
         return (add(withPage, item.copy(pageId = page.id, rect = rect)) as Placement.Ok).workspace
     }
 }
+
+/** 押し出して置いた結果。 */
+data class Pushed(
+    val workspace: Workspace,
+    /** 押し出して位置が変わった項目。 */
+    val displaced: Set<Long>,
+)
 
 data class GridChange(
     val workspace: Workspace,

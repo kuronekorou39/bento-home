@@ -51,7 +51,7 @@ import com.rou39.bentohome.layout.WorkspaceItem
 private const val MINI_ICON_RATIO = 0.7f
 
 /**
- * ホームの縮小表示（plan.md §10）。一覧で選んだアプリを置くページを選ぶ。
+ * ホームの縮小表示（plan.md §10）。一覧で選んだアプリや、ホームで選んだ項目を置くページを選ぶ。
  * 各ページのアイコン・フォルダー・ウィジェット・仕切りを小さく描き、最後に「新しいページ」を並べる。
  * @param aspect ページの横÷縦（ホームの配置の範囲に合わせる）
  */
@@ -60,7 +60,7 @@ fun HomeOverview(
     controller: HomeController,
     workspace: Workspace,
     byRef: Map<AppRef, AppEntry>,
-    count: Int,
+    title: String,
     aspect: Float,
     onPick: (pageIndex: Int?) -> Unit,
     onDismiss: () -> Unit,
@@ -79,7 +79,7 @@ fun HomeOverview(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
             Text(
-                "${count}個をどのページに置きますか",
+                title,
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
@@ -127,7 +127,7 @@ private fun PageTile(label: String, aspect: Float, onClick: () -> Unit, content:
 
 /** 1ページを縮小して描く。操作は受けない。 */
 @Composable
-private fun PageMiniature(controller: HomeController, workspace: Workspace, page: Page, byRef: Map<AppRef, AppEntry>) {
+internal fun PageMiniature(controller: HomeController, workspace: Workspace, page: Page, byRef: Map<AppRef, AppEntry>) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val grid = page.grid
         val cellW = maxWidth / grid.columns
@@ -148,7 +148,7 @@ private fun PageMiniature(controller: HomeController, workspace: Workspace, page
 }
 
 @Composable
-private fun MiniItem(controller: HomeController, item: WorkspaceItem, byRef: Map<AppRef, AppEntry>, iconSize: Dp) {
+internal fun MiniItem(controller: HomeController, item: WorkspaceItem, byRef: Map<AppRef, AppEntry>, iconSize: Dp) {
     val vm = controller.vm
     val shape = controller.style.shape
     when (val c = item.content) {

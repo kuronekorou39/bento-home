@@ -119,6 +119,7 @@ fun HomeShortcutCell(controller: HomeController, item: WorkspaceItem, shortcut: 
                 menuOpen = false
                 vm.catalog.openAppInfo(shortcut.packageName, shortcut.profileSerial)
             })
+            SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
                 DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
                     menuOpen = false
