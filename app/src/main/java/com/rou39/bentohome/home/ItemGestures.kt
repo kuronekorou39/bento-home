@@ -56,6 +56,7 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
         }
         .pointerInput(key) {
             var dragging = false
+            var holding = false
             try {
                 awaitEachGesture {
                     val down = awaitFirstDown()
@@ -82,6 +83,8 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
                     }
 
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    holding = true
+                    cb.onHoldStart()
                     dragging = false
                     do {
                         val event = awaitPointerEvent()
@@ -99,11 +102,14 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
                             if (dragging) cb.onDragMove(root)
                         }
                     } while (event.changes.any { it.pressed })
+                    holding = false
+                    cb.onHoldEnd()
                     if (dragging) cb.onDragEnd() else cb.onLongPress()
                     dragging = false
                 }
             } finally {
-                // 項目が画面から外れて処理が打ち切られても、ドラッグ状態を残さない
+                // 項目が画面から外れて処理が打ち切られても、ドラッグ状態・ハイライトを残さない
+                if (holding) cb.onHoldEnd()
                 if (dragging) cb.onDragCancel()
             }
         }
@@ -161,6 +167,7 @@ fun Modifier.widgetGestures(
                 when {
                     ended == null -> {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        cb.onHoldStart()
                         var dragging = false
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -177,6 +184,7 @@ fun Modifier.widgetGestures(
                                 if (dragging) cb.onDragMove(root)
                             }
                         } while (event.changes.any { it.pressed })
+                        cb.onHoldEnd()
                         if (dragging) cb.onDragEnd() else cb.onLongPress()
                     }
                     horizontal -> {

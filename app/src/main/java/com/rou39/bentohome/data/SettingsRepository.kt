@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -108,6 +109,11 @@ class SettingsRepository(private val context: Context) {
         val grayStages = stringPreferencesKey("gray_stages")
         val swipeDownNotifications = booleanPreferencesKey("swipe_down_notifications")
         val loopPages = booleanPreferencesKey("loop_pages")
+        /**
+         * ウィジェットの一覧に出さない提供元（ComponentName.flattenToString()）。
+         * "app:パッケージ名" はアプリごと隠したもの（後から増えたウィジェットも隠す）。
+         */
+        val hiddenWidgets = stringSetPreferencesKey("hidden_widget_providers")
     }
 
     val settings: Flow<LauncherSettings> = context.settingsStore.data.map(::read)
@@ -135,6 +141,20 @@ class SettingsRepository(private val context: Context) {
     }
 
     suspend fun setLayoutLocked(locked: Boolean) = update { it.copy(layoutLocked = locked) }
+
+    /** ウィジェットの一覧で非表示にした提供元。追加しないと決めたものを一覧から外すのに使う。 */
+    val hiddenWidgets: Flow<Set<String>> = context.settingsStore.data.map { it[Keys.hiddenWidgets].orEmpty() }
+
+    suspend fun setWidgetHidden(provider: String, hidden: Boolean) {
+        context.settingsStore.edit { p ->
+            val current = p[Keys.hiddenWidgets].orEmpty()
+            p[Keys.hiddenWidgets] = if (hidden) current + provider else current - provider
+        }
+    }
+
+    suspend fun clearHiddenWidgets() {
+        context.settingsStore.edit { it.remove(Keys.hiddenWidgets) }
+    }
 
     private fun read(p: Preferences): LauncherSettings {
         val d = LauncherSettings()

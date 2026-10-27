@@ -44,6 +44,13 @@ class HomeController(
     var dockVisible by mutableStateOf(true)
     var style by mutableStateOf(IconStyle(56.dp, IconShape.SYSTEM, true, 12))
 
+    /** 長押しでつまんでいる項目。指を離すまでハイライトする。 */
+    var heldSource by mutableStateOf<DragSource?>(null)
+        private set
+
+    /** 長押しでつまんでいる、またはメニューを開いている項目をハイライトするか。 */
+    fun isHeld(source: DragSource, menuOpen: Boolean): Boolean = menuOpen || heldSource == source
+
     /** リサイズ中のウィジェット項目。null ならリサイズしていない。 */
     var resizingItemId by mutableStateOf<Long?>(null)
 
@@ -177,7 +184,11 @@ class HomeController(
     var resetKey by mutableStateOf(0)
         private set
 
-    fun resetForHome() {
+    /**
+     * ホームボタンで戻ったときの後始末。toFirstPage は、ホームを表示したままホームボタンを押したとき。
+     * 他のアプリから戻ったときは、開く前に見ていたページのままにする。
+     */
+    fun resetForHome(toFirstPage: Boolean) {
         drawerOpen = false
         query = ""
         backgroundMenuAt = null
@@ -192,7 +203,8 @@ class HomeController(
         measureJob?.cancel()
         measureResult = null
         resetKey++
-        scope.launch { pagerState.scrollToPage(0) }
+        heldSource = null
+        if (toFirstPage) scope.launch { pagerState.scrollToPage(0) }
     }
 
     /**
@@ -292,6 +304,8 @@ class HomeController(
             onDragMove = { drag.pointer = it },
             onDragEnd = ::endDrag,
             onDragCancel = { drag.clear() },
+            onHoldStart = { heldSource = source },
+            onHoldEnd = { if (heldSource == source) heldSource = null },
         )
     }
 

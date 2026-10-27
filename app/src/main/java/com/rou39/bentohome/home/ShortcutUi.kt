@@ -114,14 +114,15 @@ fun HomeShortcutCell(controller: HomeController, item: WorkspaceItem, shortcut: 
         ),
     ) {
         ShortcutIconView(shortcut, controller, iconSize, style.labelSizeSp.takeIf { style.labelVisible })
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text("提供元のアプリ情報") }, onClick = {
+        if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            BentoMenuItem("提供元のアプリ情報", MenuSymbol.INFO, onClick = {
                 menuOpen = false
                 vm.catalog.openAppInfo(shortcut.packageName, shortcut.profileSerial)
             })
             SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
-                DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
+                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
                     menuOpen = false
                     vm.removeItem(item.id)
                 })

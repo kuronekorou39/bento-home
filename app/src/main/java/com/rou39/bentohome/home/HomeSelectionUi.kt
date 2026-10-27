@@ -121,7 +121,7 @@ fun SelectedMark() {
 @Composable
 fun SelectMenuItem(controller: HomeController, itemId: Long, close: () -> Unit) {
     if (controller.locked) return
-    DropdownMenuItem(text = { Text("選択して移動") }, onClick = {
+    BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = {
         close()
         controller.startItemSelection(itemId)
     })
@@ -243,4 +243,16 @@ fun PageJumpEffect(controller: HomeController, hovered: Int?) {
             if (index in 0 until pager.pageCount && index != pager.currentPage) pager.scrollToPage(index)
         }
     }
+}
+
+/** 長押しでつまんでいる、またはメニューを開いている項目のハイライト。 */
+@Composable
+fun HoldHighlight() {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(2.dp)
+            .border(2.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp)),
+    )
 }

@@ -361,7 +361,7 @@ private fun DrawerTile(
                     .background(MaterialTheme.colorScheme.primary),
             ) { Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp) }
         }
-        DropdownMenu(
+        BentoMenu(
             expanded = menuOpen,
             onDismissRequest = {
                 menuOpen = false
@@ -369,11 +369,11 @@ private fun DrawerTile(
             },
         ) {
             if (placement != null) {
-                DropdownMenuItem(text = { Text("${placement}にあります", fontSize = 12.sp) }, onClick = {}, enabled = false)
+                BentoMenuNote("${placement}にあります")
                 HorizontalDivider()
             }
             if (!controller.locked && !selectMode) {
-                DropdownMenuItem(text = { Text("ホームに追加") }, onClick = {
+                BentoMenuItem("ホームに追加", MenuSymbol.ADD, onClick = {
                     menuOpen = false
                     controller.vm.addAppToHome(entry.ref)
                     // 一覧を閉じて、置いた場所を光らせて見せる
@@ -415,7 +415,7 @@ private fun SelectionBar(controller: HomeController) {
 
 /** ホームに置いてあるアプリの印（小さな家の形）。 */
 @Composable
-private fun HomeMark(modifier: Modifier = Modifier) {
+internal fun HomeMark(modifier: Modifier = Modifier) {
     Canvas(modifier.size(14.dp)) {
         val w = size.width
         val h = size.height

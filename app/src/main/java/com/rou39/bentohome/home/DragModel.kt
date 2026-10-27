@@ -129,4 +129,8 @@ class ItemGestureCallbacks(
     val onDragMove: (pointer: Offset) -> Unit,
     val onDragEnd: () -> Unit,
     val onDragCancel: () -> Unit,
+    /** 長押しが成立した（つまんだ）。指を離すまで項目をハイライトする。 */
+    val onHoldStart: () -> Unit = {},
+    /** 指を離した、または操作が打ち切られた。 */
+    val onHoldEnd: () -> Unit = {},
 )

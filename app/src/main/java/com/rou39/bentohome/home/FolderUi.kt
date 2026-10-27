@@ -158,18 +158,19 @@ fun HomeFolderCell(
             folderBadge(folder.apps, byRef, badgeFor),
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text("開く") }, onClick = {
+        if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            BentoMenuItem("開く", MenuSymbol.OPEN, onClick = {
                 menuOpen = false
                 controller.openFolder(item.id)
             })
-            DropdownMenuItem(text = { Text("名前を変更") }, onClick = {
+            BentoMenuItem("名前を変更", MenuSymbol.RENAME, onClick = {
                 menuOpen = false
                 controller.openFolder(item.id, rename = true)
             })
             SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
-                DropdownMenuItem(text = { Text("ホームから削除（中のアプリも）") }, onClick = {
+                BentoMenuItem("ホームから削除（中のアプリも）", MenuSymbol.REMOVE, onClick = {
                     menuOpen = false
                     controller.vm.removeItem(item.id)
                 })
@@ -305,10 +306,10 @@ private fun FolderAppCell(
             labelSizeSp = style.labelSizeSp,
             grayLevel = gray?.level ?: 0,
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
             if (!controller.locked) {
-                DropdownMenuItem(text = { Text("フォルダーから出す") }, onClick = {
+                BentoMenuItem("フォルダーから出す", MenuSymbol.TAKE_OUT, onClick = {
                     menuOpen = false
                     controller.closeFolder()
                     vm.takeOutOfFolder(folderItemId, app)

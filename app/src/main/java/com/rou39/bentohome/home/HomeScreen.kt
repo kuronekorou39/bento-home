@@ -142,6 +142,7 @@ fun HomeScreen(
     vm: HomeViewModel,
     roleHeld: Boolean,
     homeResetCount: Int,
+    homeResetToFirstPage: Boolean,
     onRequestRole: () -> Unit,
     onOpenWidgetPicker: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -217,7 +218,7 @@ fun HomeScreen(
     val placements = remember(workspace) { homePlacements(workspace) }
     val pageAspect = geometry.gridArea.let { if (it.height > 0f) it.width / it.height else DEFAULT_PAGE_ASPECT }
 
-    LaunchedEffect(homeResetCount) { controller.resetForHome() }
+    LaunchedEffect(homeResetCount) { controller.resetForHome(toFirstPage = homeResetToFirstPage) }
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect {
             vm.currentPageIndex = it
@@ -425,45 +426,46 @@ fun HomeScreen(
 
         controller.backgroundMenuAt?.let { at ->
             Box(Modifier.offset { at.round() }) {
-                DropdownMenu(expanded = true, onDismissRequest = { controller.backgroundMenuAt = null }) {
+                BentoMenu(expanded = true, onDismissRequest = { controller.backgroundMenuAt = null }) {
                     if (!controller.locked) {
-                        DropdownMenuItem(text = { Text("ウィジェットを追加") }, onClick = {
+                        BentoMenuItem("ウィジェットを追加", MenuSymbol.WIDGET, onClick = {
                             controller.backgroundMenuAt = null
                             onOpenWidgetPicker()
                         })
                         if (workspace.items.isNotEmpty()) {
-                            DropdownMenuItem(text = { Text("選択して移動") }, onClick = { controller.startItemSelection() })
+                            BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = { controller.startItemSelection() })
                         }
                     }
                     if (pages.size >= 2) {
-                        DropdownMenuItem(text = { Text("ページの整理") }, onClick = {
+                        BentoMenuItem("ページの整理", MenuSymbol.PAGES, onClick = {
                             controller.backgroundMenuAt = null
                             controller.pageManagerOpen = true
                         })
                     }
-                    DropdownMenuItem(text = { Text("仕切り") }, onClick = {
+                    BentoMenuItem("仕切り", MenuSymbol.PARTITION, onClick = {
                         controller.backgroundMenuAt = null
                         controller.partitionPickerOpen = true
                     })
                     if (undo != null) {
-                        DropdownMenuItem(text = { Text("直前の操作を元に戻す") }, onClick = {
+                        BentoMenuItem("直前の操作を元に戻す", MenuSymbol.UNDO, onClick = {
                             controller.backgroundMenuAt = null
                             vm.undo()
                         })
                     }
-                    DropdownMenuItem(
-                        text = { Text(if (controller.locked) "配置ロックを解除" else "配置をロック") },
+                    BentoMenuItem(
+                        if (controller.locked) "配置ロックを解除" else "配置をロック",
+                        if (controller.locked) MenuSymbol.UNLOCK else MenuSymbol.LOCK,
                         onClick = {
                             controller.backgroundMenuAt = null
                             vm.setLayoutLocked(!controller.locked)
                         },
                     )
-                    DropdownMenuItem(text = { Text("すべてのアプリ") }, onClick = controller::openDrawer)
-                    DropdownMenuItem(text = { Text("システムモニター") }, onClick = {
+                    BentoMenuItem("すべてのアプリ", MenuSymbol.ALL_APPS, onClick = controller::openDrawer)
+                    BentoMenuItem("システムモニター", MenuSymbol.MONITOR, onClick = {
                         controller.backgroundMenuAt = null
                         onOpenMonitor()
                     })
-                    DropdownMenuItem(text = { Text("設定") }, onClick = {
+                    BentoMenuItem("設定", MenuSymbol.SETTINGS, onClick = {
                         controller.backgroundMenuAt = null
                         onOpenSettings()
                     })
@@ -853,11 +855,16 @@ private fun ResizeFrame(
                 Edge.TOP -> Alignment.TopCenter
                 Edge.BOTTOM -> Alignment.BottomCenter
             }
+            // この辺で広げられるか・狭められるか。どちらもできない辺は触れないようにする
+            val (grow, shrink) = edgeMoves(edge, item.rect, limits, grid)
+            val sideways = edge == Edge.LEFT || edge == Edge.RIGHT
             Box(
-                Modifier
+                contentAlignment = align,
+                modifier = Modifier
                     .align(align)
-                    .size(36.dp)
-                    .pointerInput(edge, item.rect) {
+                    .size(if (sideways) DpSize(HANDLE_TOUCH_DEPTH, HANDLE_TOUCH_LENGTH) else DpSize(HANDLE_TOUCH_LENGTH, HANDLE_TOUCH_DEPTH))
+                    .pointerInput(edge, item.rect, grow || shrink) {
+                        if (!grow && !shrink) return@pointerInput
                         var total = Offset.Zero
                         detectDragGestures(
                             onDragStart = { total = Offset.Zero },
@@ -872,10 +879,72 @@ private fun ResizeFrame(
                             onDragCancel = { preview = item.rect },
                         )
                     },
-                contentAlignment = Alignment.Center,
             ) {
-                Box(Modifier.size(16.dp).clip(CircleShape).background(Color.White))
+                ResizeHandle(edge, grow, shrink)
             }
+        }
+    }
+}
+
+/** 辺を外へ動かして広げられるか（first）、内へ動かして狭められるか（second）。 */
+private fun edgeMoves(edge: Edge, rect: CellRect, limits: ResizeLimits, grid: GridSpec): Pair<Boolean, Boolean> = when (edge) {
+    Edge.LEFT -> (rect.width < limits.maxWidth && rect.x > 0) to (rect.width > limits.minWidth)
+    Edge.RIGHT -> (rect.width < limits.maxWidth && rect.right < grid.columns) to (rect.width > limits.minWidth)
+    Edge.TOP -> (rect.height < limits.maxHeight && rect.y > 0) to (rect.height > limits.minHeight)
+    Edge.BOTTOM -> (rect.height < limits.maxHeight && rect.bottom < grid.rows) to (rect.height > limits.minHeight)
+}
+
+private val HANDLE_RADIUS = 20.dp
+private val HANDLE_TOUCH_DEPTH = 28.dp
+private val HANDLE_TOUCH_LENGTH = 52.dp
+private val HANDLE_COLOR = Color.White.copy(alpha = 0.92f)
+private val HANDLE_DISABLED_COLOR = Color.White.copy(alpha = 0.25f)
+private val HANDLE_ARROW_COLOR = Color.Black.copy(alpha = 0.45f)
+
+/**
+ * リサイズのつまみ。平らな側を枠の辺に付けた半円で、中に動かせる向きを薄い矢印で示す。
+ * 外向きの矢印は広げられる、内向きは狭められる。どちらもできない辺は薄くして矢印を出さない。
+ */
+@Composable
+private fun ResizeHandle(edge: Edge, grow: Boolean, shrink: Boolean) {
+    val sideways = edge == Edge.LEFT || edge == Edge.RIGHT
+    val size = if (sideways) DpSize(HANDLE_RADIUS, HANDLE_RADIUS * 2) else DpSize(HANDLE_RADIUS * 2, HANDLE_RADIUS)
+    Canvas(Modifier.size(size)) {
+        val r = HANDLE_RADIUS.toPx()
+        val w = this.size.width
+        val h = this.size.height
+        // 半円の中心（枠の辺の上）・描き始めの角度・外向きの向き
+        val (center, startAngle, out) = when (edge) {
+            Edge.LEFT -> Triple(Offset(0f, h / 2), -90f, Offset(-1f, 0f))
+            Edge.RIGHT -> Triple(Offset(w, h / 2), 90f, Offset(1f, 0f))
+            Edge.TOP -> Triple(Offset(w / 2, 0f), 0f, Offset(0f, -1f))
+            Edge.BOTTOM -> Triple(Offset(w / 2, h), 180f, Offset(0f, 1f))
+        }
+        val enabled = grow || shrink
+        drawArc(
+            color = if (enabled) HANDLE_COLOR else HANDLE_DISABLED_COLOR,
+            startAngle = startAngle,
+            sweepAngle = 180f,
+            useCenter = true,
+            topLeft = center - Offset(r, r),
+            size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+        )
+        if (!enabled) return@Canvas
+        val mid = center - out * (r * 0.5f)
+        val half = r * 0.4f
+        val inner = mid - out * half
+        val outer = mid + out * half
+        val head = r * 0.26f
+        val across = Offset(-out.y, out.x)
+        val stroke = 2.dp.toPx()
+        drawLine(HANDLE_ARROW_COLOR, inner, outer, stroke)
+        if (grow) {
+            drawLine(HANDLE_ARROW_COLOR, outer, outer - out * head + across * head, stroke)
+            drawLine(HANDLE_ARROW_COLOR, outer, outer - out * head - across * head, stroke)
+        }
+        if (shrink) {
+            drawLine(HANDLE_ARROW_COLOR, inner, inner + out * head + across * head, stroke)
+            drawLine(HANDLE_ARROW_COLOR, inner, inner + out * head - across * head, stroke)
         }
     }
 }
@@ -915,11 +984,12 @@ private fun HomeAppCell(
             labelSizeSp = style.labelSizeSp.takeIf { style.labelVisible },
             grayLevel = gray?.level ?: 0,
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
             SelectMenuItem(controller, item.id, close = { menuOpen = false })
             if (!controller.locked) {
-                DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
+                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
                     menuOpen = false
                     controller.vm.removeItem(item.id)
                 })
@@ -934,7 +1004,7 @@ fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit
     val context = LocalContext.current
     if (entry == null) return
     if (gray != null) {
-        DropdownMenuItem(text = { Text(gray.describe(), fontSize = 12.sp) }, onClick = {}, enabled = false)
+        BentoMenuNote(gray.describe())
         HorizontalDivider()
     }
     val catalog = controller.vm.catalog
@@ -957,17 +1027,17 @@ fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit
         )
     }
     if (shortcuts.isNotEmpty()) HorizontalDivider()
-    DropdownMenuItem(text = { Text("アプリ情報") }, onClick = {
+    BentoMenuItem("アプリ情報", MenuSymbol.INFO, onClick = {
         close()
         catalog.openAppInfo(entry, null)
     })
     if (!entry.isSystemApp) {
-        DropdownMenuItem(text = { Text("アンインストール") }, onClick = {
+        BentoMenuItem("アンインストール", MenuSymbol.UNINSTALL, onClick = {
             close()
             context.startActivity(catalog.uninstallIntent(entry))
         })
     }
-    DropdownMenuItem(text = { Text("外観の個別設定") }, onClick = {
+    BentoMenuItem("外観の個別設定", MenuSymbol.APPEARANCE, onClick = {
         close()
         controller.appearanceTarget = entry
     })
@@ -1023,36 +1093,37 @@ private fun HomeWidgetCell(
             WidgetHostSurface(controller, widget.widgetId, visible && controller.hiddenWidgetId != widget.widgetId)
         }
         if (selecting) Box(Modifier.matchParentSize().launcherItemGestures(item.id, callbacks))
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val reconfigurable = info != null && info.configure != null &&
                 info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE != 0
             if (reconfigurable) {
-                DropdownMenuItem(text = { Text("ウィジェットを設定") }, onClick = {
+                BentoMenuItem("ウィジェットを設定", MenuSymbol.CONFIGURE, onClick = {
                     menuOpen = false
                     controller.onReconfigureWidget(widget.widgetId)
                 })
             }
             if (info != null) {
-                DropdownMenuItem(text = { Text("負荷を測る") }, onClick = {
+                BentoMenuItem("負荷を測る", MenuSymbol.MEASURE, onClick = {
                     menuOpen = false
                     controller.measureWidget(item.id, widget.widgetId, label.toString())
                 })
             }
             if (controller.locked) {
-                DropdownMenuItem(text = { Text("配置はロック中です") }, onClick = { menuOpen = false })
+                BentoMenuItem("配置はロック中です", MenuSymbol.LOCK, onClick = { menuOpen = false })
             } else {
                 SelectMenuItem(controller, item.id, close = { menuOpen = false })
                 if (info != null) {
                     if (resizable(info, vm.resizeLimits(info))) {
-                        DropdownMenuItem(text = { Text("サイズ変更") }, onClick = {
+                        BentoMenuItem("サイズ変更", MenuSymbol.RESIZE, onClick = {
                             menuOpen = false
                             controller.resizingItemId = item.id
                         })
                     } else {
-                        DropdownMenuItem(text = { Text("サイズは変えられません（提供元の指定）") }, onClick = {}, enabled = false)
+                        BentoMenuNote("サイズは変えられません（提供元の指定）")
                     }
                 }
-                DropdownMenuItem(text = { Text("ホームから削除") }, onClick = {
+                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
                     menuOpen = false
                     vm.removeItem(item.id)
                 })
@@ -1191,10 +1262,11 @@ private fun DockAppCell(
             labelSizeSp = null,
             grayLevel = gray?.level ?: 0,
         )
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        if (controller.isHeld(DragSource.Dock(slot), menuOpen)) HoldHighlight()
+        BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
             if (!controller.locked) {
-                DropdownMenuItem(text = { Text("ドックから外す") }, onClick = {
+                BentoMenuItem("ドックから外す", MenuSymbol.REMOVE, onClick = {
                     menuOpen = false
                     controller.vm.removeDock(slot)
                 })

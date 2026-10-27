@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import com.rou39.bentohome.badge.BadgeListenerService
 import com.rou39.bentohome.badge.BadgeRepository
 import com.rou39.bentohome.container
+import com.rou39.bentohome.layout.ItemContent
 import com.rou39.bentohome.monitor.MonitorActivity
 import com.rou39.bentohome.settings.SettingsActivity
 
@@ -31,6 +32,12 @@ class HomeActivity : ComponentActivity() {
     private var showPicker by mutableStateOf(false)
     private var roleHeld by mutableStateOf(true)
     private var homeResetCount by mutableIntStateOf(0)
+
+    /** 直近のホームボタンで最初のページへ戻すか（ホームを表示したまま押したときだけ）。 */
+    private var homeResetToFirstPage by mutableStateOf(true)
+
+    /** 前に表示してから他の画面へ移ったか。ホームボタンで戻ったとき、ページを保つかの判断に使う。 */
+    private var stoppedSinceResume = false
 
     /** ホーム表示中はグラフを長い間隔で記録する（docs/monitor.md）。 */
     private var monitorHandle: AutoCloseable? = null
@@ -64,6 +71,7 @@ class HomeActivity : ComponentActivity() {
                         vm = vm,
                         roleHeld = roleHeld,
                         homeResetCount = homeResetCount,
+                        homeResetToFirstPage = homeResetToFirstPage,
                         onRequestRole = ::requestRole,
                         onOpenWidgetPicker = { showPicker = true },
                         onOpenSettings = { startActivity(Intent(this@HomeActivity, SettingsActivity::class.java)) },
@@ -73,7 +81,14 @@ class HomeActivity : ComponentActivity() {
                     )
                     if (showPicker) {
                         BackHandler { showPicker = false }
-                        WidgetPicker(widgetHost, onPick = ::addWidget, onClose = { showPicker = false })
+                        WidgetPicker(
+                            widgetHost,
+                            container.settingsRepository,
+                            placedProviders = vm.workspace.value?.items.orEmpty()
+                                .mapNotNullTo(HashSet()) { (it.content as? ItemContent.Widget)?.provider },
+                            onPick = ::addWidget,
+                            onClose = { showPicker = false },
+                        )
                     }
                 }
             }
@@ -90,23 +105,30 @@ class HomeActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        stoppedSinceResume = false
         BadgeRepository.onAccessChecked(BadgeListenerService.isAccessGranted(this))
         vm.refreshClock()
     }
 
     override fun onStop() {
         super.onStop()
+        stoppedSinceResume = true
         widgetHost.stopListening()
         container.selfMetrics.onHomeStop()
         monitorHandle?.close()
         monitorHandle = null
     }
 
-    /** ホーム操作で戻ったときは一時的な状態を解除し、最初のページへ戻す（plan.md §2）。 */
+    /**
+     * ホーム操作で戻ったときは一時的な状態を解除する（plan.md §2）。
+     * ホームを表示したまま押したら最初のページへ戻し、他のアプリから戻ったときは見ていたページのままにする。
+     * 他のアプリから戻るときは onStart の後にここへ来るので、onStop 以降に onResume を通っていないかで見分ける。
+     */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        Log.d(TAG, "home intent received")
+        Log.d(TAG, "home intent received (from other app: $stoppedSinceResume)")
         showPicker = false
+        homeResetToFirstPage = !stoppedSinceResume
         homeResetCount++
     }
 
