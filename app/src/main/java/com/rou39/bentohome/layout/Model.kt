@@ -45,6 +45,17 @@ sealed interface ItemContent {
         }
     }
 
+    /**
+     * 他のアプリから「ホーム画面に追加」で置いたショートカット（plan.md §10）。
+     * label は置いたときの名前。提供元から取れないときの表示に使う。
+     */
+    data class Shortcut(
+        val packageName: String,
+        val shortcutId: String,
+        val profileSerial: Long,
+        val label: String,
+    ) : ItemContent
+
     /** アプリをまとめたフォルダー（plan.md §10）。中が1つ以下になったら [LayoutEngine] がアプリに戻すか消す。 */
     data class Folder(val title: String, val apps: List<AppRef>) : ItemContent {
         companion object {
@@ -86,7 +97,7 @@ data class Workspace(
             when (val c = it.content) {
                 is ItemContent.App -> 1
                 is ItemContent.Folder -> c.apps.size
-                is ItemContent.Widget -> 0
+                is ItemContent.Widget, is ItemContent.Shortcut -> 0
             }
         }
 

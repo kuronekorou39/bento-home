@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         UsageSummaryEntity::class,
         FolderAppEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         // v2: app_appearance を追加
@@ -25,6 +25,8 @@ import androidx.room.RoomDatabase
         AutoMigration(from = 2, to = 3),
         // v4: フォルダー（workspace_item.title と folder_app）を追加
         AutoMigration(from = 3, to = 4),
+        // v5: ショートカット（workspace_item.shortcutId）を追加
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class BentoDatabase : RoomDatabase() {

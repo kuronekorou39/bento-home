@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -81,6 +82,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val _focusPage = MutableSharedFlow<Int>(extraBufferCapacity = 1)
     val focusPage: SharedFlow<Int> = _focusPage.asSharedFlow()
 
+    /** ホームから外したショートカットの提供元。取り消しの猶予が過ぎたら OS 側の固定も外す。 */
+    private val pendingUnpins = mutableSetOf<Pair<String, Long>>()
+
     /** 取り消しの猶予中なので、まだ解放していないウィジェット ID（docs/design.md §4）。 */
     private val pendingWidgetDeletes = mutableSetOf<Int>()
 
@@ -102,6 +106,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             _workspace.value = ws
             repo.save(ws)
             releaseOrphanWidgetIds(ws)
+            releaseOrphanPins(ws)
+            // 配置を読み込んでから受け取る。読み込み前に届いたものはチャンネルに溜まっている
+            launch { c.pinRequests.receiveAsFlow().collect(::placePinned) }
             // 設定画面でマス目やドックの枠を変えたら、ここで配置に反映する
             settingsRepo.settings.collect(::applyLayoutSettings)
         }
@@ -113,6 +120,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         finalizePendingWidgetDeletes()
+        finalizeUnpins()
     }
 
     fun refreshClock() {
@@ -130,6 +138,18 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun launchShortcut(entry: AppEntry, shortcut: android.content.pm.ShortcutInfo) {
         if (catalog.startShortcut(shortcut, null)) usageRepo.recordLaunch(entry.ref)
+    }
+
+    /** ホームに置いたショートカットを開く。提供元が消していたら知らせる。 */
+    fun launchPinned(s: ItemContent.Shortcut, bounds: android.graphics.Rect?) {
+        val info = catalog.pinnedShortcut(s.packageName, s.shortcutId, s.profileSerial)
+        val message = when {
+            info == null -> "このショートカットは見つかりません"
+            !info.isEnabled -> info.disabledMessage?.toString() ?: "このショートカットは使えません"
+            catalog.startShortcut(info, bounds) -> return
+            else -> "開けませんでした"
+        }
+        android.widget.Toast.makeText(getApplication(), message, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     fun setDrawerSort(sort: DrawerSort) {
@@ -279,6 +299,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (index >= 0) _focusPage.tryEmit(index)
     }
 
+    // ---- ホーム画面に追加（plan.md §10） ----
+
+    private fun placePinned(item: PinnedItem) {
+        when (item) {
+            is PinnedItem.Shortcut -> {
+                val ws = _workspace.value ?: return
+                val span = gridOf(ws).iconSpan
+                val (next, itemId) = placeSomewhere(ws, span, span) { pageId, rect -> WorkspaceItem(0, pageId, rect, item.content) }
+                commit(next, message = "ホームに追加しました", focusItemId = itemId)
+            }
+            is PinnedItem.Widget -> {
+                val info = widgetHost.info(item.widgetId)
+                if (info == null) widgetHost.delete(item.widgetId) else placeNewWidget(item.widgetId, info)
+            }
+        }
+    }
+
     // ---- フォルダー（plan.md §10） ----
 
     fun renameFolder(itemId: Long, title: String) {
@@ -401,7 +438,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val prev = _workspace.value ?: return
         finalizePendingWidgetDeletes()
+        finalizeUnpins()
         val pruned = LayoutEngine.pruneTrailingEmptyPages(next)
+        val after = shortcutsOf(pruned)
+        pendingUnpins += shortcutsOf(prev).filter { (key, ids) -> !after[key].orEmpty().containsAll(ids) }.keys
         _workspace.value = pruned
         repo.save(pruned)
         undoSnapshot = prev
@@ -420,6 +460,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         finalizePendingWidgetDeletes()
         _workspace.value = snapshot
         repo.save(snapshot)
+        // 戻した配置を基準に固定を合わせる（戻したショートカットは固定したまま）
+        finalizeUnpins()
         _undo.value = null
         syncSettingsWith(snapshot)
         // 戻した項目のあるページを表示する
@@ -450,6 +492,19 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val pageId = ws.item(itemId)?.pageId ?: return
         val index = ws.orderedPages.indexOfFirst { it.id == pageId }
         if (index >= 0) _focusPage.tryEmit(index)
+    }
+
+    /** 提供元ごとの、ホームに置いたショートカットの ID。 */
+    private fun shortcutsOf(ws: Workspace): Map<Pair<String, Long>, Set<String>> =
+        ws.items.mapNotNull { it.content as? ItemContent.Shortcut }
+            .groupBy({ it.packageName to it.profileSerial }, { it.shortcutId })
+            .mapValues { it.value.toSet() }
+
+    private fun finalizeUnpins() {
+        if (pendingUnpins.isEmpty()) return
+        val current = _workspace.value?.let(::shortcutsOf).orEmpty()
+        for (key in pendingUnpins) catalog.pinShortcuts(key.first, current[key].orEmpty().toList(), key.second)
+        pendingUnpins.clear()
     }
 
     private fun finalizePendingWidgetDeletes() {
@@ -493,12 +548,24 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                 is ItemContent.App -> resolve(c.app)?.let { item.copy(content = ItemContent.App(it)) }
                 is ItemContent.Folder -> item.copy(content = c.copy(apps = c.apps.mapNotNull(::resolve).distinct()))
                 is ItemContent.Widget -> item
+                is ItemContent.Shortcut ->
+                    item.takeUnless { c.profileSerial == catalog.mainProfileSerial && !catalog.isInstalled(c.packageName) }
             }
         }
         val dock = ws.dock.mapNotNull { slot -> resolve(slot.app)?.let { DockSlot(slot.slot, it) } }
         val cleaned = LayoutEngine.normalizeFolders(ws.copy(items = items, dock = dock))
         if (cleaned != ws) Log.d(TAG, "cleaned up missing apps")
         return cleaned
+    }
+
+    /** OS 側で固定したままで配置に無いショートカットを外す。取り消し猶予中にプロセスが終わった場合の後始末。 */
+    private fun releaseOrphanPins(ws: Workspace) {
+        val onHome = shortcutsOf(ws)
+        val main = catalog.mainProfileSerial
+        for ((pkg, pinned) in catalog.pinnedByBento()) {
+            val keep = onHome[pkg to main].orEmpty()
+            if (!keep.containsAll(pinned)) catalog.pinShortcuts(pkg, keep.toList(), main)
+        }
     }
 
     /** ホスト側にあって配置に無い ID を解放する。取り消し猶予中にプロセスが終わった場合の後始末。 */
@@ -510,9 +577,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onPackageRemoved(e: PackageEvent.Removed) {
         val ws = _workspace.value ?: return
-        val next = LayoutEngine.removeApps(ws) { ref ->
-            ref.packageName == e.packageName && ref.profileSerial == e.profileSerial
-        }
+        val next = LayoutEngine.removePackage(ws, e.packageName, e.profileSerial)
         if (next == ws) return
         // アンインストールは取り消せないので、取り消し用の状態も捨てる
         finalizePendingWidgetDeletes()

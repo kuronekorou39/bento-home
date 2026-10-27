@@ -153,6 +153,58 @@ class AppCatalog(private val context: Context) {
             .onFailure { Log.w(TAG, "shortcut failed: ${shortcut.`package`}", it) }
             .isSuccess
 
+    // ---- ホームに固定したショートカット（plan.md §10） ----
+
+    fun serialOf(user: UserHandle): Long = userManager.getSerialNumberForUser(user)
+
+    private fun userOf(serial: Long): UserHandle? = userManager.getUserForSerialNumber(serial)
+
+    /** ホームに固定したショートカットを探す。提供元が消した・既定のホームでないときは null。 */
+    fun pinnedShortcut(packageName: String, shortcutId: String, profileSerial: Long): ShortcutInfo? {
+        if (!launcherApps.hasShortcutHostPermission()) return null
+        val user = userOf(profileSerial) ?: return null
+        val query = LauncherApps.ShortcutQuery()
+            .setPackage(packageName)
+            .setShortcutIds(listOf(shortcutId))
+            .setQueryFlags(
+                LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC,
+            )
+        return runCatching { launcherApps.getShortcuts(query, user)?.firstOrNull() }
+            .onFailure { Log.w(TAG, "pinned shortcut failed: $packageName", it) }
+            .getOrNull()
+    }
+
+    /**
+     * Bento が固定しているショートカットを、ホームに残っている ID だけにする。
+     * 外したものは、提供元が他で使っていなければ OS が消す。
+     */
+    fun pinShortcuts(packageName: String, shortcutIds: List<String>, profileSerial: Long) {
+        if (!launcherApps.hasShortcutHostPermission()) return
+        val user = userOf(profileSerial) ?: return
+        runCatching { launcherApps.pinShortcuts(packageName, shortcutIds, user) }
+            .onSuccess { Log.d(TAG, "pinned shortcuts: $packageName ${shortcutIds.size}") }
+            .onFailure { Log.w(TAG, "pin shortcuts failed: $packageName", it) }
+    }
+
+    /** Bento が OS 側で固定しているショートカット（メインプロファイル）。提供元ごとの ID。 */
+    fun pinnedByBento(): Map<String, Set<String>> {
+        if (!launcherApps.hasShortcutHostPermission()) return emptyMap()
+        val query = LauncherApps.ShortcutQuery().setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        return runCatching { launcherApps.getShortcuts(query, Process.myUserHandle()).orEmpty() }
+            .onFailure { Log.w(TAG, "pinned query failed", it) }
+            .getOrDefault(emptyList())
+            .groupBy({ it.`package` }, { it.id })
+            .mapValues { it.value.toSet() }
+    }
+
+    fun openAppInfo(packageName: String, profileSerial: Long) {
+        val user = userOf(profileSerial) ?: return
+        val component = launcherApps.getActivityList(packageName, user).firstOrNull()?.componentName ?: return
+        runCatching { launcherApps.startAppDetailsActivity(component, user, null, null) }
+            .onFailure { Log.w(TAG, "app info failed: $packageName", it) }
+    }
+
     fun uninstallIntent(entry: AppEntry): Intent =
         Intent(Intent.ACTION_DELETE, Uri.fromParts("package", entry.packageName, null))
             .putExtra(Intent.EXTRA_USER, entry.user)

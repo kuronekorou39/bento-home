@@ -37,8 +37,8 @@ data class BackupFile(
 ) {
     companion object {
         const val FORMAT = "bento-home-backup"
-        /** v2: フォルダー（BackupItem.title・apps）を追加。 */
-        const val SCHEMA_VERSION = 2
+        /** v2: フォルダー（BackupItem.title・apps）。v3: ショートカット（BackupItem.shortcutId）。 */
+        const val SCHEMA_VERSION = 3
     }
 }
 
@@ -78,11 +78,14 @@ data class BackupItem(
     /** フォルダーの名前と中のアプリ（v2）。 */
     val title: String? = null,
     val apps: List<BackupApp>? = null,
+    /** ショートカットの ID（v3）。パッケージ名は component、名前は title に入れる。 */
+    val shortcutId: String? = null,
 ) {
     companion object {
         const val TYPE_APP = "app"
         const val TYPE_WIDGET = "widget"
         const val TYPE_FOLDER = "folder"
+        const val TYPE_SHORTCUT = "shortcut"
     }
 }
 
@@ -179,6 +182,10 @@ object BackupCodec {
                     item.id, item.pageId, BackupItem.TYPE_WIDGET, r.x, r.y, r.width, r.height,
                     widgetProvider = c.provider,
                 )
+                is ItemContent.Shortcut -> BackupItem(
+                    item.id, item.pageId, BackupItem.TYPE_SHORTCUT, r.x, r.y, r.width, r.height,
+                    component = c.packageName, profileSerial = c.profileSerial, title = c.label, shortcutId = c.shortcutId,
+                )
                 is ItemContent.Folder -> BackupItem(
                     item.id, item.pageId, BackupItem.TYPE_FOLDER, r.x, r.y, r.width, r.height,
                     title = c.title, apps = c.apps.map { BackupApp(it.component, it.profileSerial) },
@@ -219,6 +226,18 @@ object BackupCodec {
                 BackupItem.TYPE_WIDGET -> {
                     widgets++
                     WorkspaceItem(b.id, b.pageId, rect, ItemContent.Widget(ItemContent.Widget.NO_ID, b.widgetProvider.orEmpty()))
+                }
+                // ショートカットは提供元が入っていれば戻す。開けるかは提供元が持っているか次第
+                BackupItem.TYPE_SHORTCUT -> {
+                    val pkg = b.component ?: return@mapNotNull null
+                    val id = b.shortcutId ?: return@mapNotNull null
+                    val serial = b.profileSerial ?: 0
+                    if (!isInstalled(AppRef("$pkg/", serial))) {
+                        skipped++
+                        null
+                    } else {
+                        WorkspaceItem(b.id, b.pageId, rect, ItemContent.Shortcut(pkg, id, serial, b.title.orEmpty()))
+                    }
                 }
                 BackupItem.TYPE_FOLDER -> {
                     val (present, missing) = b.apps.orEmpty().map { AppRef(it.component, it.profileSerial) }

@@ -36,6 +36,7 @@ sealed interface DragVisual {
     data class App(val app: AppRef) : DragVisual
     data class Widget(val label: String) : DragVisual
     data class Folder(val folder: ItemContent.Folder) : DragVisual
+    data class Shortcut(val shortcut: ItemContent.Shortcut) : DragVisual
 }
 
 /** 画面全体（ルート座標）で共有するドラッグ状態。 */

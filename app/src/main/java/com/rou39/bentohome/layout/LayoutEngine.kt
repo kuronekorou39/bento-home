@@ -149,7 +149,7 @@ object LayoutEngine {
                 ItemContent.Folder(ItemContent.Folder.DEFAULT_TITLE, listOf(c.app, app))
             }
             is ItemContent.Folder -> if (app in c.apps) c else c.copy(apps = c.apps + app)
-            is ItemContent.Widget -> return Placement.Blocked
+            is ItemContent.Widget, is ItemContent.Shortcut -> return Placement.Blocked
         }
         return Placement.Ok(replaceContent(ws, targetItemId, folder))
     }
@@ -164,6 +164,17 @@ object LayoutEngine {
     fun renameFolder(ws: Workspace, folderItemId: Long, title: String): Workspace {
         val folder = ws.item(folderItemId)?.content as? ItemContent.Folder ?: return ws
         return replaceContent(ws, folderItemId, folder.copy(title = title.trim().ifEmpty { ItemContent.Folder.DEFAULT_TITLE }))
+    }
+
+    /** パッケージのアプリとショートカットを、ホーム・フォルダー・ドックのすべてから外す（アンインストール時）。 */
+    fun removePackage(ws: Workspace, packageName: String, profileSerial: Long): Workspace {
+        val withoutShortcuts = ws.copy(
+            items = ws.items.filterNot {
+                val s = it.content as? ItemContent.Shortcut
+                s != null && s.packageName == packageName && s.profileSerial == profileSerial
+            },
+        )
+        return removeApps(withoutShortcuts) { it.packageName == packageName && it.profileSerial == profileSerial }
     }
 
     /** 条件に合うアプリを、ホーム・フォルダー・ドックのすべてから外す（アンインストール時）。 */

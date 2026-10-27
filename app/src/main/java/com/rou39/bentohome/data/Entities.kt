@@ -30,7 +30,7 @@ data class PageEntity(
 data class ItemEntity(
     @PrimaryKey val id: Long,
     val pageId: Long,
-    /** [TYPE_APP]・[TYPE_WIDGET]・[TYPE_FOLDER] */
+    /** [TYPE_APP]・[TYPE_WIDGET]・[TYPE_FOLDER]・[TYPE_SHORTCUT] */
     val type: String,
     val cellX: Int,
     val cellY: Int,
@@ -40,13 +40,16 @@ data class ItemEntity(
     val profileSerial: Long?,
     val widgetId: Int?,
     val widgetProvider: String?,
-    /** フォルダーの名前（v4）。中のアプリは [FolderAppEntity]。 */
+    /** フォルダー・ショートカットの名前（v4）。フォルダーの中のアプリは [FolderAppEntity]。 */
     val title: String? = null,
+    /** ショートカットの ID（v5）。パッケージ名は component に入れる。 */
+    val shortcutId: String? = null,
 ) {
     companion object {
         const val TYPE_APP = "APP"
         const val TYPE_WIDGET = "WIDGET"
         const val TYPE_FOLDER = "FOLDER"
+        const val TYPE_SHORTCUT = "SHORTCUT"
     }
 }
 

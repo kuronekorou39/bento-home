@@ -501,6 +501,7 @@ private fun WorkspacePage(
                                 HomeWidgetCell(controller, item, content, content.widgetId in hostIds, widgetsVisible)
                             is ItemContent.Folder ->
                                 HomeFolderCell(controller, item, content, byRef, iconSize, badgeFor)
+                            is ItemContent.Shortcut -> HomeShortcutCell(controller, item, content, iconSize)
                         }
                     }
                 }
@@ -953,6 +954,7 @@ private fun DragGhost(controller: HomeController, byRef: Map<AppRef, AppEntry>) 
         when (visual) {
             is DragVisual.App ->
                 AppIconView(byRef[visual.app], controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null)
+            is DragVisual.Shortcut -> ShortcutIconView(visual.shortcut, controller, style.iconSize, labelSizeSp = null)
             is DragVisual.Folder -> FolderIconView(
                 visual.folder, byRef, controller.vm.iconCache, style.iconSize, style.shape, null, labelSizeSp = null,
             )

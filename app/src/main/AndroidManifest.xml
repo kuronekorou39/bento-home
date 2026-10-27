@@ -59,6 +59,21 @@
             </intent-filter>
         </activity>
 
+        <!-- 他のアプリの「ホーム画面に追加」を受ける（plan.md §10）。OS は既定のホームのこの画面を開く。
+             ホームの作業グループに入れると背後に前のホームが透けるので、独立させて呼び出し元の上に出す -->
+        <activity
+            android:name=".home.PinRequestActivity"
+            android:autoRemoveFromRecents="true"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Bento.Dialog">
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_SHORTCUT" />
+                <action android:name="android.content.pm.action.CONFIRM_PIN_APPWIDGET" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".monitor.MonitorActivity"
             android:exported="false"

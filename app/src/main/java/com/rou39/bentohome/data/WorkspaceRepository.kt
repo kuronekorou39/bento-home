@@ -76,6 +76,11 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
                 item.id, item.pageId, ItemEntity.TYPE_WIDGET, r.x, r.y, r.width, r.height,
                 component = null, profileSerial = null, widgetId = c.widgetId, widgetProvider = c.provider,
             )
+            is ItemContent.Shortcut -> ItemEntity(
+                item.id, item.pageId, ItemEntity.TYPE_SHORTCUT, r.x, r.y, r.width, r.height,
+                component = c.packageName, profileSerial = c.profileSerial, widgetId = null, widgetProvider = null,
+                title = c.label, shortcutId = c.shortcutId,
+            )
             is ItemContent.Folder -> ItemEntity(
                 item.id, item.pageId, ItemEntity.TYPE_FOLDER, r.x, r.y, r.width, r.height,
                 component = null, profileSerial = null, widgetId = null, widgetProvider = null, title = c.title,
@@ -92,6 +97,9 @@ class WorkspaceRepository(private val dao: WorkspaceDao, appScope: CoroutineScop
                 ItemContent.App(AppRef(component, e.profileSerial ?: 0))
             }
             ItemEntity.TYPE_WIDGET -> ItemContent.Widget(e.widgetId ?: return null, e.widgetProvider.orEmpty())
+            ItemEntity.TYPE_SHORTCUT -> ItemContent.Shortcut(
+                e.component ?: return null, e.shortcutId ?: return null, e.profileSerial ?: 0, e.title.orEmpty(),
+            )
             ItemEntity.TYPE_FOLDER -> when (folderApps.size) {
                 0 -> return null
                 1 -> ItemContent.App(folderApps.single())

@@ -22,7 +22,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import com.rou39.bentohome.backup.RestorePlan
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import com.rou39.bentohome.home.PinnedItem
 
 class BentoApplication : Application() {
     lateinit var container: AppContainer
@@ -51,6 +53,9 @@ class AppContainer(context: Context) {
     val privileged = PrivilegedBridge()
     val monitor = MonitorRepository(context, appScope, privileged)
     val appStats = AppStats(context)
+
+    /** 「ホーム画面に追加」で受け入れた項目をホームへ渡す。ホームが読むまで溜めておく（plan.md §10）。 */
+    val pinRequests = Channel<PinnedItem>(Channel.UNLIMITED)
 
     /** 設定画面からホームへ復元を渡す。ホームが購読していなければ設定画面が直接保存する。 */
     val restoreRequests = MutableSharedFlow<RestorePlan>()

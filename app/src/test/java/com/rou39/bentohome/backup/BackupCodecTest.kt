@@ -107,4 +107,20 @@ class BackupCodecTest {
         // この端末に無いアプリを除くと1つになるフォルダーはアプリに戻る
         assertEquals(ItemContent.App(chat), plan.workspace.item(11)!!.content)
     }
+
+    @Test
+    fun shortcutsRoundTripWhenProviderIsInstalled() {
+        val ws = workspace.copy(
+            items = workspace.items + listOf(
+                WorkspaceItem(20, 1, CellRect(0, 6, 2, 2), ItemContent.Shortcut("com.chat", "web-1", 0, "ページ")),
+                WorkspaceItem(21, 1, CellRect(2, 6, 2, 2), ItemContent.Shortcut("com.gone", "web-2", 0, "消える")),
+            ),
+        )
+        val file = BackupCodec.decode(
+            BackupCodec.encode(BackupCodec.fromState(ws, settings, appearances, null, exportedAt = 1, appVersion = "x")),
+        )
+        val plan = BackupCodec.toRestorePlan(file, { it.packageName != "com.gone" }, LauncherSettings())
+        assertEquals(ItemContent.Shortcut("com.chat", "web-1", 0, "ページ"), plan.workspace.item(20)!!.content)
+        assertNull(plan.workspace.item(21))
+    }
 }

@@ -81,4 +81,25 @@ class FolderTest {
         assertEquals(Placement.Blocked, LayoutEngine.moveItemToDock(w, 1, 1, 5))
         assertEquals(4, w.appCount)
     }
+
+    @Test
+    fun removingPackageAlsoRemovesItsShortcuts() {
+        val chromeShortcut = WorkspaceItem(5, 1, CellRect(0, 6, 2, 2), ItemContent.Shortcut("com.a", "web-1", 0, "ページ"))
+        val otherProfile = WorkspaceItem(6, 1, CellRect(2, 6, 2, 2), ItemContent.Shortcut("com.a", "web-2", 10, "仕事"))
+        val w = ws(icon(1, 0, a), folder(2, a, b, c), chromeShortcut, otherProfile)
+        val next = LayoutEngine.removePackage(w, "com.a", 0)
+        assertNull(next.item(1))
+        assertNull(next.item(5))
+        assertEquals(otherProfile, next.item(6))
+        assertEquals(listOf(b, c), (next.item(2)!!.content as ItemContent.Folder).apps)
+    }
+
+    @Test
+    fun shortcutsCannotBeMergedOrDocked() {
+        val s = WorkspaceItem(5, 1, CellRect(0, 6, 2, 2), ItemContent.Shortcut("com.a", "web-1", 0, "ページ"))
+        val w = ws(s)
+        assertEquals(Placement.Blocked, LayoutEngine.mergeInto(w, 5, a))
+        assertEquals(Placement.Blocked, LayoutEngine.moveItemToDock(w, 5, 0, 5))
+        assertEquals(0, w.appCount)
+    }
 }
