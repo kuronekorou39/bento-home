@@ -119,6 +119,12 @@ fun AppDrawer(
     val selectMode = multiPage && !controller.locked
     // 一覧を閉じたら選択を捨てる
     DisposableEffect(Unit) { onDispose { controller.clearSelection() } }
+    // アンインストールなどで一覧から消えたアプリは、選択からも外す
+    LaunchedEffect(apps) {
+        val present = apps.mapTo(HashSet()) { it.ref }
+        controller.selectedApps.retainAll(present)
+        if (controller.drawerMenuRef?.let { it !in present } == true) controller.drawerMenuRef = null
+    }
     var showHidden by remember { mutableStateOf(false) }
     // ホームにまだ置いていないアプリだけを出す
     var offHomeOnly by remember { mutableStateOf(false) }
