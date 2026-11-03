@@ -1,6 +1,6 @@
 package com.rou39.bentohome.monitor
 
-/** アプリ一覧の1行。プロセス・使用時間・通信量・容量をアプリ単位にまとめたもの。 */
+/** 今動いているプロセス・今日の使用時間・通信量をアプリ単位にまとめたもの。 */
 data class AppRow(
     val key: String,
     val label: String,
@@ -11,7 +11,6 @@ data class AppRow(
     val processes: List<ProcessLoad>,
     val foregroundMs: Long?,
     val networkBytes: Long?,
-    val storageBytes: Long?,
     val uids: Set<Int>,
 )
 
@@ -19,16 +18,12 @@ enum class AppSort(val label: String) {
     CPU("CPU"),
     MEMORY("メモリ"),
     SCREEN("今日の使用時間"),
-    NETWORK("今日の通信量"),
-    STORAGE("容量"),
     ;
 
     fun value(row: AppRow): Double? = when (this) {
         CPU -> row.cpuPercent?.toDouble()
         MEMORY -> row.rssKb?.toDouble()
         SCREEN -> row.foregroundMs?.toDouble()
-        NETWORK -> row.networkBytes?.toDouble()
-        STORAGE -> row.storageBytes?.toDouble()
     }
 }
 
@@ -40,7 +35,6 @@ object AppRows {
     fun build(
         processes: List<ProcessLoad>,
         daily: DailyAppStats?,
-        storage: Map<Int, Long>,
         packagesForUid: (Int) -> List<String>,
         label: (String) -> String,
         ownPackage: String = "",
@@ -87,7 +81,6 @@ object AppRows {
                 processes = a.procs.sortedByDescending { it.cpuPercent },
                 foregroundMs = a.fg,
                 networkBytes = a.net,
-                storageBytes = a.uids.filter { it >= FIRST_APPLICATION_UID }.mapNotNull { storage[it] }.maxOrNull(),
                 uids = a.uids,
             )
         }

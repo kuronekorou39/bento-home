@@ -88,7 +88,6 @@ internal fun OverviewTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
         Modifier.verticalScroll(rememberScrollState()).padding(TAB_PADDING),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        AccessCard(vm, open)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             WINDOWS.forEach { (ms, label) ->
                 FilterChip(selected = windowMs == ms, onClick = { windowMs = ms }, label = { Text("直近$label") })
@@ -114,6 +113,8 @@ internal fun OverviewTab(vm: MonitorViewModel, open: (Intent) -> Unit) {
                 if (spec.tile == Tile.CPU && !s.series[Metric.CPU].isNullOrEmpty()) TopCpuApps(rows)
             }
         }
+        // 権限の案内は普段見ないので一番下に置く
+        AccessCard(vm, open)
     }
 }
 

@@ -1,7 +1,7 @@
 package com.rou39.bentohome.monitor
 
 /**
- * 棚卸しの1行（plan.md §10）。インストールしているアプリを、整理するための値で並べる。
+ * 棚卸しの値（plan.md §10）。インストールしているアプリを、整理するための値で並べる。
  * 値は読めたものだけ入る（使用状況へのアクセスが無い・計測用プロセスが無いときは null）。
  */
 data class InventoryRow(
@@ -34,20 +34,58 @@ data class InventoryState(
     val loadedAt: Long = 0,
 )
 
-enum class InventorySort(val label: String) {
+/** アプリのタブの1行。インストールしているアプリの値（棚卸し）と、動いているプロセスの値をまとめる。 */
+data class AppListRow(
+    val key: String,
+    val label: String,
+    /** アプリならパッケージ名。OS のプロセスなら null。 */
+    val packageName: String?,
+    /** システムのアプリか、起動できないアプリ・OS のプロセス。普段は隠す。 */
+    val isSystem: Boolean,
+    val inventory: InventoryRow?,
+    val live: AppRow?,
+)
+
+object AppList {
+    /** 棚卸しの行に、同じアプリのプロセスの値を重ねる。起動できないものは後ろに足す。 */
+    fun merge(inventory: List<InventoryRow>, live: List<AppRow>): List<AppListRow> {
+        val liveByPackage = live.filter { it.packageName != null }.associateBy { it.packageName }
+        val known = inventory.mapTo(HashSet()) { it.packageName }
+        return inventory.map { AppListRow(it.packageName, it.label, it.packageName, it.isSystem, it, liveByPackage[it.packageName]) } +
+            live.filter { it.packageName !in known }.map { AppListRow(it.key, it.label, it.packageName, true, null, it) }
+    }
+}
+
+enum class AppListSort(val label: String, private val live: Boolean = false) {
     UNUSED("使っていない順"),
+    SCREEN("今日の使用時間", live = true),
     STORAGE("容量"),
     NETWORK("通信量"),
     BACKGROUND_NETWORK("裏の通信量"),
     BATTERY("電池"),
+    CPU("CPU", live = true),
+    MEMORY("メモリ", live = true),
     ;
 
-    /** 並べ替え。値の無い行は後ろ（使っていない順では、1年使っていないアプリを先頭）。 */
-    fun sort(rows: List<InventoryRow>): List<InventoryRow> = when (this) {
-        UNUSED -> rows.sortedWith(compareBy<InventoryRow> { it.lastUsedAt ?: Long.MIN_VALUE }.thenBy { it.label.lowercase() })
-        STORAGE -> rows.sortedByDescending { it.storageBytes ?: -1 }
-        NETWORK -> rows.sortedByDescending { it.networkBytes ?: -1 }
-        BACKGROUND_NETWORK -> rows.sortedByDescending { it.backgroundNetworkBytes ?: -1 }
-        BATTERY -> rows.sortedByDescending { it.battery?.totalMah ?: -1.0 }
+    fun value(row: AppListRow): Double? = when (this) {
+        UNUSED -> null
+        SCREEN -> row.live?.foregroundMs?.toDouble()
+        STORAGE -> row.inventory?.storageBytes?.toDouble()
+        NETWORK -> row.inventory?.networkBytes?.toDouble()
+        BACKGROUND_NETWORK -> row.inventory?.backgroundNetworkBytes?.toDouble()
+        BATTERY -> row.inventory?.battery?.totalMah
+        CPU -> row.live?.cpuPercent?.toDouble()
+        MEMORY -> row.live?.rssKb?.toDouble()
+    }
+
+    /**
+     * 並べ替え。今の値（CPU など）は 0 の行を省く。棚卸しの値は、値の無い行を後ろに回す
+     * （使っていない順では、1年使っていないアプリを先頭）。
+     */
+    fun sort(rows: List<AppListRow>): List<AppListRow> = when {
+        this == UNUSED -> rows.filter { it.inventory != null }
+            .sortedWith(compareBy<AppListRow> { it.inventory?.lastUsedAt ?: Long.MIN_VALUE }.thenBy { it.label.lowercase() })
+        live -> rows.filter { (value(it) ?: 0.0) > 0.0 }.sortedByDescending { value(it) }
+        else -> rows.filter { it.inventory != null }.sortedByDescending { value(it) ?: -1.0 }
     }
 }

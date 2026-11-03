@@ -43,17 +43,3 @@ internal fun SectionCard(title: String?, modifier: Modifier = Modifier, content:
         }
     }
 }
-
-/** 一覧の上に置く注記をひとまとめにする。行が増えても一覧と混ざらないように面を敷く。 */
-@Composable
-internal fun NoteBox(notes: List<String>, modifier: Modifier = Modifier) {
-    if (notes.isEmpty()) return
-    Card(
-        modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            notes.forEach { Small(it) }
-        }
-    }
-}

@@ -44,7 +44,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -168,14 +167,24 @@ fun HomeScreen(
     val pages = remember(workspace) { workspace.orderedPages }
     val drag = remember { DragState() }
     val geometry = remember { HomeGeometry() }
-    val pageCount by rememberUpdatedState(pages.size + if (drag.active) 1 else 0)
+    // ループ中は両端に反対の端の複製を置く（[HomeController.loopActive]）
+    val loopActive = settings.loopPages && pages.size >= 2
+    val pageCount by rememberUpdatedState(if (loopActive) pages.size + 2 else pages.size + if (drag.active) 1 else 0)
     val pagerState = rememberPagerState(pageCount = remember { { pageCount } })
-    val pageKey: (Int) -> Any = remember(pages) { { index -> pages.getOrNull(index)?.id ?: -1L } }
     val scope = rememberCoroutineScope()
     val controller = remember { HomeController(vm, drag, geometry, pagerState, scope) }
     controller.locked = settings.layoutLocked
     controller.dockVisible = settings.dockVisible
     controller.loopPages = settings.loopPages
+    controller.realPageCount = pages.size
+    val pageKey: (Int) -> Any = remember(pages) {
+        { index ->
+            when {
+                controller.isLoopCopy(index) -> if (index == 0) "loop-last" else "loop-first"
+                else -> pages.getOrNull(controller.realIndex(index))?.id ?: -1L
+            }
+        }
+    }
     controller.style = settings.iconStyle()
     controller.disguiseExempt = remember(appearances) { appearances.filterValues { it.disguiseExempt }.keys }
     controller.onReconfigureWidget = onReconfigureWidget
@@ -223,12 +232,24 @@ fun HomeScreen(
 
     LaunchedEffect(homeResetCount) { controller.resetForHome(toFirstPage = homeResetToFirstPage) }
     LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.currentPage }.collect {
-            vm.currentPageIndex = it
+        var lastLoop = controller.loopActive
+        snapshotFlow { pagerState.currentPage to controller.loopActive }.collect { (page, loop) ->
+            // ループの入り切りでページャーの位置の意味が変わるので、見ていたページの位置へ移し直す
+            if (loop != lastLoop) {
+                lastLoop = loop
+                val real = vm.currentPageIndex.coerceIn(0, (controller.realPageCount - 1).coerceAtLeast(0))
+                pagerState.scrollToPage(controller.virtualIndex(real))
+                return@collect
+            }
+            vm.currentPageIndex = controller.realIndex(page)
             controller.resizingItemId = null
         }
     }
-    LaunchedEffect(vm) { vm.focusPage.collect { pagerState.animateScrollToPage(it) } }
+    // 複製のページで止まったら本物のページへ移す
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.isScrollInProgress to pagerState.currentPage }.collect { controller.normalizeLoopCopy() }
+    }
+    LaunchedEffect(vm) { vm.focusPage.collect { pagerState.animateScrollToPage(controller.virtualIndex(it)) } }
     LaunchedEffect(vm) { vm.pulse.collect(controller::pulse) }
     // 消えた項目は選択から外す
     LaunchedEffect(workspace) {
@@ -238,7 +259,7 @@ fun HomeScreen(
     LaunchedEffect(settings.layoutLocked) { if (settings.layoutLocked) controller.clearItemSelection() }
     EdgeFlipEffect(controller)
     PageJumpEffect(controller, hoveredStripPage)
-    WallpaperScrollEffect(pagerState, pages.size)
+    WallpaperScrollEffect(controller, pages.size)
 
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(undo?.token) {
@@ -301,18 +322,32 @@ fun HomeScreen(
                     state = pagerState,
                     beyondViewportPageCount = pages.size + 1,
                     key = pageKey,
-                    modifier = Modifier.fillMaxSize().loopAtEdges(controller),
+                    modifier = Modifier.fillMaxSize(),
                 ) { index ->
-                    val page = pages.getOrNull(index)
+                    val realIndex = controller.realIndex(index)
+                    val isCopy = controller.isLoopCopy(index)
+                    val page = pages.getOrNull(realIndex)
                     // 見えていないページ・一覧の下のウィジェットは View を非表示にして、提供元のアニメーションを止める
                     val pageVisible by remember(index) {
                         derivedStateOf { pagerState.layoutInfo.visiblePagesInfo.any { it.index == index } }
                     }
-                    val onThisPage = (target as? DropTarget.Cell)?.pageIndex == index
+                    // ウィジェットの View は1つなので、複製と本物のどちらか一方にだけ置く。複製は見えている間だけ使う
+                    val hostWidgets by remember(index, isCopy, realIndex) {
+                        derivedStateOf {
+                            val visible = pagerState.layoutInfo.visiblePagesInfo
+                            if (isCopy) {
+                                visible.any { it.index == index }
+                            } else {
+                                val copy = controller.loopCopyOf(realIndex)
+                                copy == null || visible.none { it.index == copy }
+                            }
+                        }
+                    }
+                    val onThisPage = !isCopy && (target as? DropTarget.Cell)?.pageIndex == realIndex
                     val highlights = when (val t = target) {
                         is DropTarget.Cell -> if (onThisPage) preview?.rects.orEmpty() else emptyList()
                         // まとめ先は、その項目の範囲を示す
-                        is DropTarget.Merge -> listOfNotNull(workspace.item(t.itemId)?.rect?.takeIf { t.pageIndex == index })
+                        is DropTarget.Merge -> listOfNotNull(workspace.item(t.itemId)?.rect?.takeIf { !isCopy && t.pageIndex == realIndex })
                         else -> emptyList()
                     }
                     WorkspacePage(
@@ -327,12 +362,13 @@ fun HomeScreen(
                         highlightValid = targetValid,
                         displaced = if (onThisPage && targetValid) preview?.displaced.orEmpty() else emptyList(),
                         widgetsVisible = pageVisible && !controller.drawerOpen,
+                        hostWidgets = hostWidgets,
                     )
                 }
             }
             PageIndicator(
-                count = pagerState.pageCount,
-                current = pagerState.currentPage,
+                count = if (controller.loopActive) pages.size + if (drag.active) 1 else 0 else pagerState.pageCount,
+                current = controller.currentRealPage,
                 onOpenDrawer = controller::openDrawer,
             )
             if (settings.dockVisible) {
@@ -429,53 +465,58 @@ fun HomeScreen(
 
         controller.backgroundMenuAt?.let { at ->
             Box(Modifier.offset { at.round() }) {
+                // 上の段に記号で伝わるもの、下に「置く」と「整える」を分けて並べる
                 BentoMenu(expanded = true, onDismissRequest = { controller.backgroundMenuAt = null }) {
+                    val close = { controller.backgroundMenuAt = null }
+                    BentoMenuActions(
+                        listOf(
+                            MenuAction("直前の操作を元に戻す", MenuSymbol.UNDO, enabled = undo != null) {
+                                close()
+                                vm.undo()
+                            },
+                            MenuAction("システムモニター", MenuSymbol.MONITOR) {
+                                close()
+                                onOpenMonitor()
+                            },
+                            MenuAction("設定", MenuSymbol.SETTINGS) {
+                                close()
+                                onOpenSettings()
+                            },
+                        ),
+                    )
+                    BentoMenuDivider()
                     if (!controller.locked) {
                         BentoMenuItem("ウィジェットを追加", MenuSymbol.WIDGET, onClick = {
-                            controller.backgroundMenuAt = null
+                            close()
                             onOpenWidgetPicker()
                         })
                         BentoMenuItem("具材を置く", MenuSymbol.GARNISH, onClick = {
-                            controller.backgroundMenuAt = null
+                            close()
                             controller.garnishPickerOpen = true
-                        })
-                        if (workspace.items.isNotEmpty()) {
-                            BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = { controller.startItemSelection() })
-                        }
-                    }
-                    if (pages.size >= 2) {
-                        BentoMenuItem("ページの整理", MenuSymbol.PAGES, onClick = {
-                            controller.backgroundMenuAt = null
-                            controller.pageManagerOpen = true
                         })
                     }
                     BentoMenuItem("仕切り", MenuSymbol.PARTITION, onClick = {
-                        controller.backgroundMenuAt = null
+                        close()
                         controller.partitionPickerOpen = true
                     })
-                    if (undo != null) {
-                        BentoMenuItem("直前の操作を元に戻す", MenuSymbol.UNDO, onClick = {
-                            controller.backgroundMenuAt = null
-                            vm.undo()
+                    BentoMenuDivider()
+                    if (!controller.locked && workspace.items.isNotEmpty()) {
+                        BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = { controller.startItemSelection() })
+                    }
+                    if (pages.size >= 2) {
+                        BentoMenuItem("ページの整理", MenuSymbol.PAGES, onClick = {
+                            close()
+                            controller.pageManagerOpen = true
                         })
                     }
                     BentoMenuItem(
                         if (controller.locked) "配置ロックを解除" else "配置をロック",
                         if (controller.locked) MenuSymbol.UNLOCK else MenuSymbol.LOCK,
                         onClick = {
-                            controller.backgroundMenuAt = null
+                            close()
                             vm.setLayoutLocked(!controller.locked)
                         },
                     )
-                    BentoMenuItem("すべてのアプリ", MenuSymbol.ALL_APPS, onClick = controller::openDrawer)
-                    BentoMenuItem("システムモニター", MenuSymbol.MONITOR, onClick = {
-                        controller.backgroundMenuAt = null
-                        onOpenMonitor()
-                    })
-                    BentoMenuItem("設定", MenuSymbol.SETTINGS, onClick = {
-                        controller.backgroundMenuAt = null
-                        onOpenSettings()
-                    })
                 }
             }
         }
@@ -505,12 +546,12 @@ fun HomeScreen(
         }
 
         if (controller.partitionPickerOpen) {
-            val page = workspace.pageAt(pagerState.currentPage)
+            val page = workspace.pageAt(controller.currentRealPage)
             PartitionPicker(
                 current = page?.partition ?: Partition.NONE,
                 onPick = {
                     controller.partitionPickerOpen = false
-                    vm.setPartition(pagerState.currentPage, it)
+                    vm.setPartition(controller.currentRealPage, it)
                 },
                 onDismiss = { controller.partitionPickerOpen = false },
             )
@@ -543,37 +584,6 @@ fun HomeScreen(
     }
 }
 
-/**
- * ループの設定がオンのとき、端のページで外へめくったら反対の端へ移る（plan.md §10）。
- * 指の動きを見るだけで消費しないので、ページャーの端の伸び縮みの表示はそのまま出る。
- */
-private fun Modifier.loopAtEdges(controller: HomeController): Modifier = this.then(
-    Modifier.pointerInput(Unit) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val pager = controller.pagerState
-            if (!controller.loopPages || controller.drag.active || pager.pageCount < 2) return@awaitEachGesture
-            if (pager.currentPageOffsetFraction != 0f) return@awaitEachGesture
-            val atFirst = pager.currentPage == 0
-            val atLast = pager.currentPage == pager.pageCount - 1
-            if (!atFirst && !atLast) return@awaitEachGesture
-            var total = Offset.Zero
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                if (!change.pressed) break
-                total += change.position - change.previousPosition
-            }
-            if (controller.drag.active || abs(total.x) < abs(total.y)) return@awaitEachGesture
-            val threshold = LOOP_THRESHOLD_PX
-            when {
-                atLast && total.x < -threshold -> controller.wrapPage(forward = true)
-                atFirst && total.x > threshold -> controller.wrapPage(forward = false)
-            }
-        }
-    },
-)
-
 /** 背景の縦スワイプ。上でアプリ一覧、下で通知パネル（onSwipeDown が null なら何もしない）。 */
 private fun Modifier.verticalSwipe(threshold: Float, onSwipeUp: () -> Unit, onSwipeDown: (() -> Unit)?): Modifier =
     this.then(
@@ -600,18 +610,29 @@ private fun Modifier.verticalSwipe(threshold: Float, onSwipeUp: () -> Unit, onSw
  * ページ数は実際のページの数を使う。ドラッグ中に置き先として足す空のページを数えると、つまんだだけで壁紙がずれる。
  */
 @Composable
-private fun WallpaperScrollEffect(pagerState: PagerState, realPageCount: Int) {
+private fun WallpaperScrollEffect(controller: HomeController, realPageCount: Int) {
     val view = LocalView.current
     val wallpaper = remember { android.app.WallpaperManager.getInstance(view.context) }
     val realCount by rememberUpdatedState(realPageCount)
+    val pagerState = controller.pagerState
     LaunchedEffect(pagerState) {
         snapshotFlow {
             val count = realCount.coerceAtLeast(1)
-            count to (pagerState.currentPage + pagerState.currentPageOffsetFraction).coerceAtMost((count - 1).toFloat())
+            val loop = controller.loopActive
+            val raw = pagerState.currentPage + pagerState.currentPageOffsetFraction
+            val position = if (loop) raw - 1f else raw
+            count to position.coerceAtMost(if (loop) count.toFloat() else (count - 1).toFloat())
         }.collect { (count, position) ->
             val token = view.windowToken ?: return@collect
             val steps = if (count > 1) 1f / (count - 1) else 0f
-            val x = if (count > 1) (position / (count - 1)).coerceIn(0f, 1f) else 0.5f
+            val last = (count - 1).toFloat()
+            // ループで端から反対の端の複製へめくる間は、壁紙も反対の端へ戻していく
+            val x = when {
+                count <= 1 -> 0.5f
+                position < 0f -> -position
+                position > last -> 1f - (position - last)
+                else -> position / last
+            }.coerceIn(0f, 1f)
             wallpaper.setWallpaperOffsetSteps(steps, 0f)
             wallpaper.setWallpaperOffsets(token, x, 0.5f)
         }
@@ -641,7 +662,9 @@ private fun EdgeFlipEffect(controller: HomeController) {
                 if (now - since >= EDGE_FLIP_DELAY_MS) {
                     val pager = controller.pagerState
                     val next = pager.currentPage + d
-                    if (next in 0 until pager.pageCount) pager.animateScrollToPage(next)
+                    // 運んでいる間はループしない（複製のページへは送らない）
+                    val first = if (controller.loopActive) 1 else 0
+                    if (next in first until pager.pageCount) pager.animateScrollToPage(next)
                     since = System.currentTimeMillis()
                 }
             } else {
@@ -667,6 +690,8 @@ private fun WorkspacePage(
     /** 置くと押し出される項目（動いた後の位置）。元の位置は薄くし、動いた先に薄く示す。 */
     displaced: List<WorkspaceItem>,
     widgetsVisible: Boolean,
+    /** ウィジェットの View をこのページに置くか。ループの複製と本物で取り合わないようにする。 */
+    hostWidgets: Boolean = true,
 ) {
     val vm = controller.vm
     val grid = page?.grid ?: vm.currentGrid()
@@ -716,7 +741,7 @@ private fun WorkspacePage(
                             is ItemContent.App ->
                                 HomeAppCell(controller, item, content.app, byRef[content.app], iconSize, badgeFor, grayFor)
                             is ItemContent.Widget ->
-                                HomeWidgetCell(controller, item, content, content.widgetId in hostIds, widgetsVisible)
+                                HomeWidgetCell(controller, item, content, content.widgetId in hostIds, widgetsVisible, hostWidgets)
                             is ItemContent.Folder ->
                                 HomeFolderCell(controller, item, content, byRef, iconSize, badgeFor)
                             is ItemContent.Shortcut -> HomeShortcutCell(controller, item, content, iconSize)
@@ -1018,61 +1043,79 @@ private fun HomeAppCell(
         )
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
-            SelectMenuItem(controller, item.id, close = { menuOpen = false })
-            if (!controller.locked) {
-                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
-                    menuOpen = false
-                    controller.vm.removeItem(item.id)
-                })
-            }
+            val close = { menuOpen = false }
+            AppMenu(controller, entry, close, lead = homeItemActions(controller, item.id, close), gray = gray)
         }
     }
 }
 
-/** アプリショートカット・アプリ情報・アンインストール・外観の個別設定。ホーム・ドック・一覧で共通。 */
+/**
+ * アプリの長押しメニュー。ホーム・ドック・フォルダー・一覧で共通。
+ * 上の段に記号だけの操作（場所ごとの操作 [lead]・アプリ情報・外観の個別設定）、
+ * その下にアプリのショートカット、最後に状態の説明（灰色の理由・[notes]）を置く。
+ * アンインストールは [uninstall] のときだけ出す。ホームの長押しから消せるのは行き過ぎなので、一覧でだけ使う。
+ */
 @Composable
-fun AppMenuItems(controller: HomeController, entry: AppEntry?, close: () -> Unit, gray: GrayReason? = null) {
+fun AppMenu(
+    controller: HomeController,
+    entry: AppEntry?,
+    close: () -> Unit,
+    lead: List<MenuAction>,
+    gray: GrayReason? = null,
+    notes: List<String> = emptyList(),
+    uninstall: Boolean = false,
+) {
     val context = LocalContext.current
-    if (entry == null) return
-    if (gray != null) {
-        BentoMenuNote(gray.describe())
-        HorizontalDivider()
-    }
     val catalog = controller.vm.catalog
+    val actions = buildList {
+        addAll(lead)
+        if (entry != null) {
+            add(MenuAction("アプリ情報", MenuSymbol.INFO) {
+                close()
+                catalog.openAppInfo(entry, null)
+            })
+            add(MenuAction("外観の個別設定", MenuSymbol.APPEARANCE) {
+                close()
+                controller.appearanceTarget = entry
+            })
+            if (uninstall && !entry.isSystemApp) {
+                add(MenuAction("アンインストール", MenuSymbol.UNINSTALL) {
+                    close()
+                    context.startActivity(catalog.uninstallIntent(entry))
+                })
+            }
+        }
+    }
+    BentoMenuActions(actions)
+
     val density = context.resources.displayMetrics.densityDpi
     val shortcuts by produceState<List<Pair<android.content.pm.ShortcutInfo, ImageBitmap?>>>(emptyList(), entry) {
+        if (entry == null) return@produceState
         value = withContext(Dispatchers.IO) {
             catalog.shortcutsFor(entry).map { s ->
                 s to catalog.shortcutIcon(s, density)?.toBitmap(96, 96)?.asImageBitmap()
             }
         }
     }
-    for ((shortcut, icon) in shortcuts) {
-        DropdownMenuItem(
-            text = { Text(shortcut.shortLabel?.toString() ?: shortcut.id) },
-            leadingIcon = icon?.let { { Image(it, contentDescription = null, modifier = Modifier.size(24.dp)) } },
-            onClick = {
-                close()
-                controller.vm.launchShortcut(entry, shortcut)
-            },
-        )
+    if (entry != null && shortcuts.isNotEmpty()) {
+        if (actions.isNotEmpty()) BentoMenuDivider()
+        for ((shortcut, icon) in shortcuts) {
+            DropdownMenuItem(
+                text = { Text(shortcut.shortLabel?.toString() ?: shortcut.id) },
+                leadingIcon = icon?.let { { Image(it, contentDescription = null, modifier = Modifier.size(24.dp)) } },
+                onClick = {
+                    close()
+                    controller.vm.launchShortcut(entry, shortcut)
+                },
+            )
+        }
     }
-    if (shortcuts.isNotEmpty()) HorizontalDivider()
-    BentoMenuItem("アプリ情報", MenuSymbol.INFO, onClick = {
-        close()
-        catalog.openAppInfo(entry, null)
-    })
-    if (!entry.isSystemApp) {
-        BentoMenuItem("アンインストール", MenuSymbol.UNINSTALL, onClick = {
-            close()
-            context.startActivity(catalog.uninstallIntent(entry))
-        })
+
+    val allNotes = listOfNotNull(gray?.describe()) + notes
+    if (allNotes.isNotEmpty()) {
+        BentoMenuDivider()
+        allNotes.forEach { BentoMenuNote(it) }
     }
-    BentoMenuItem("外観の個別設定", MenuSymbol.APPEARANCE, onClick = {
-        close()
-        controller.appearanceTarget = entry
-    })
 }
 
 @Composable
@@ -1082,6 +1125,7 @@ private fun HomeWidgetCell(
     widget: ItemContent.Widget,
     onHost: Boolean,
     visible: Boolean,
+    hostView: Boolean = true,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     LaunchedEffect(controller.resetKey) { menuOpen = false }
@@ -1122,43 +1166,44 @@ private fun HomeWidgetCell(
                 Text("タップしてウィジェットを追加し直す", color = Color.White, fontSize = 12.sp)
             }
         } else {
-            WidgetHostSurface(controller, widget.widgetId, visible && controller.hiddenWidgetId != widget.widgetId)
+            if (hostView) WidgetHostSurface(controller, widget.widgetId, visible && controller.hiddenWidgetId != widget.widgetId)
         }
         if (selecting) Box(Modifier.matchParentSize().launcherItemGestures(item.id, callbacks))
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            val close = { menuOpen = false }
+            val canResize = info != null && resizable(info, vm.resizeLimits(info))
+            BentoMenuActions(
+                homeItemActions(controller, item.id, close) +
+                    listOfNotNull(
+                        MenuAction("サイズ変更", MenuSymbol.RESIZE) {
+                            close()
+                            controller.resizingItemId = item.id
+                        }.takeIf { canResize && !controller.locked },
+                    ),
+            )
             val reconfigurable = info != null && info.configure != null &&
                 info.widgetFeatures and AppWidgetProviderInfo.WIDGET_FEATURE_RECONFIGURABLE != 0
-            if (reconfigurable) {
-                BentoMenuItem("ウィジェットを設定", MenuSymbol.CONFIGURE, onClick = {
-                    menuOpen = false
-                    controller.onReconfigureWidget(widget.widgetId)
-                })
-            }
             if (info != null) {
+                if (!controller.locked) BentoMenuDivider()
+                if (reconfigurable) {
+                    BentoMenuItem("ウィジェットを設定", MenuSymbol.CONFIGURE, onClick = {
+                        close()
+                        controller.onReconfigureWidget(widget.widgetId)
+                    })
+                }
                 BentoMenuItem("負荷を測る", MenuSymbol.MEASURE, onClick = {
-                    menuOpen = false
+                    close()
                     controller.measureWidget(item.id, widget.widgetId, label.toString())
                 })
             }
-            if (controller.locked) {
-                BentoMenuItem("配置はロック中です", MenuSymbol.LOCK, onClick = { menuOpen = false })
-            } else {
-                SelectMenuItem(controller, item.id, close = { menuOpen = false })
-                if (info != null) {
-                    if (resizable(info, vm.resizeLimits(info))) {
-                        BentoMenuItem("サイズ変更", MenuSymbol.RESIZE, onClick = {
-                            menuOpen = false
-                            controller.resizingItemId = item.id
-                        })
-                    } else {
-                        BentoMenuNote("サイズは変えられません（提供元の指定）")
-                    }
-                }
-                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
-                    menuOpen = false
-                    vm.removeItem(item.id)
-                })
+            val notes = listOfNotNull(
+                "配置はロック中です".takeIf { controller.locked },
+                "サイズは変えられません（提供元の指定）".takeIf { info != null && !canResize && !controller.locked },
+            )
+            if (notes.isNotEmpty()) {
+                BentoMenuDivider()
+                notes.forEach { BentoMenuNote(it) }
             }
         }
     }
@@ -1297,13 +1342,14 @@ private fun DockAppCell(
         )
         if (controller.isHeld(DragSource.Dock(slot), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
-            if (!controller.locked) {
-                BentoMenuItem("ドックから外す", MenuSymbol.REMOVE, onClick = {
-                    menuOpen = false
+            val close = { menuOpen = false }
+            val lead = listOfNotNull(
+                MenuAction("ドックから外す", MenuSymbol.REMOVE) {
+                    close()
                     controller.vm.removeDock(slot)
-                })
-            }
+                }.takeIf { !controller.locked },
+            )
+            AppMenu(controller, entry, close, lead = lead, gray = gray)
         }
     }
 }

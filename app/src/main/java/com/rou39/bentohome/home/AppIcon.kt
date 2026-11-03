@@ -78,11 +78,10 @@ fun rememberAppIcon(entry: AppEntry?, size: Dp, shape: IconShape, cache: IconCac
     if (entry == null) return null
     val px = with(LocalDensity.current) { size.roundToPx() }
     val key = IconCache.key(entry.ref.component, entry.ref.profileSerial, px, shape)
+    // 初期値は最初の表示でしか使われないので、形や大きさが変わったら（key が変わったら）ここで描き直す
     val bitmap by produceState(cache.get(key)?.asImageBitmap(), key, entry) {
-        if (value == null) {
-            value = withContext(Dispatchers.IO) {
-                IconRenderer.render(entry.info.getIcon(0), px, shape).also { cache.put(key, it) }.asImageBitmap()
-            }
+        value = cache.get(key)?.asImageBitmap() ?: withContext(Dispatchers.IO) {
+            IconRenderer.render(entry.info.getIcon(0), px, shape).also { cache.put(key, it) }.asImageBitmap()
         }
     }
     return bitmap
@@ -196,11 +195,10 @@ private fun rememberSilhouette(entry: AppEntry?, size: Dp, cache: IconCache): Im
     if (entry == null) return null
     val px = with(LocalDensity.current) { size.roundToPx() }
     val key = "${entry.ref.component}#${entry.ref.profileSerial}@$px:silhouette"
+    // 初期値は最初の表示でしか使われないので、形や大きさが変わったら（key が変わったら）ここで描き直す
     val bitmap by produceState(cache.get(key)?.asImageBitmap(), key, entry) {
-        if (value == null) {
-            value = withContext(Dispatchers.IO) {
-                IconRenderer.renderSilhouette(entry.info.getIcon(0), px).also { cache.put(key, it) }.asImageBitmap()
-            }
+        value = cache.get(key)?.asImageBitmap() ?: withContext(Dispatchers.IO) {
+            IconRenderer.renderSilhouette(entry.info.getIcon(0), px).also { cache.put(key, it) }.asImageBitmap()
         }
     }
     return bitmap

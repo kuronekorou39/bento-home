@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -117,14 +116,27 @@ fun SelectedMark() {
     }
 }
 
-/** 長押しメニューの「選択して移動」。ホームで選ぶ操作を始め、その項目を選んだ状態にする。 */
-@Composable
-fun SelectMenuItem(controller: HomeController, itemId: Long, close: () -> Unit) {
-    if (controller.locked) return
-    BentoMenuItem("選択して移動", MenuSymbol.SELECT, onClick = {
-        close()
-        controller.startItemSelection(itemId)
-    })
+/**
+ * ホームの項目の長押しメニューに共通する、上の段の「削除」「選択して移動」。ロック中は出さない。
+ * 選択して移動は、ホームで選ぶ操作を始め、その項目を選んだ状態にする。
+ */
+fun homeItemActions(
+    controller: HomeController,
+    itemId: Long,
+    close: () -> Unit,
+    removeLabel: String = "ホームから削除",
+): List<MenuAction> {
+    if (controller.locked) return emptyList()
+    return listOf(
+        MenuAction(removeLabel, MenuSymbol.REMOVE) {
+            close()
+            controller.vm.removeItem(itemId)
+        },
+        MenuAction("選択して移動", MenuSymbol.SELECT) {
+            close()
+            controller.startItemSelection(itemId)
+        },
+    )
 }
 
 /** ホームで選んでいる間の操作。ドックの位置に重ねて出す。 */
@@ -194,7 +206,7 @@ fun PageStrip(
             for (i in 0 until count) {
                 val page = pages.getOrNull(i)
                 val hot = hovered == i
-                val current = controller.pagerState.currentPage == i
+                val current = controller.currentRealPage == i
                 val label = if (page != null) "${i + 1}" else "新規"
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -240,7 +252,8 @@ fun PageJumpEffect(controller: HomeController, hovered: Int?) {
             if (index == null) return@collectLatest
             delay(PAGE_JUMP_DELAY_MS)
             val pager = controller.pagerState
-            if (index in 0 until pager.pageCount && index != pager.currentPage) pager.scrollToPage(index)
+            val target = controller.virtualIndex(index)
+            if (target in 0 until pager.pageCount && index != controller.currentRealPage) pager.scrollToPage(target)
         }
     }
 }

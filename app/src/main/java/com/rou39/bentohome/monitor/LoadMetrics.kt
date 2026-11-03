@@ -37,10 +37,6 @@ class SelfMetrics {
     private val frames = AtomicLong()
     private val thread by lazy { HandlerThread("frame-metrics").apply { start() } }
 
-    /** ホームを表示していた間の合計。 */
-    private var homeTotal = SelfCounters(0, 0, 0)
-    private var homeStartedAt: SelfCounters? = null
-
     var homeVisible = false
         private set
 
@@ -61,22 +57,10 @@ class SelfMetrics {
     fun onHomeStart() {
         homeVisible = true
         homeStarts++
-        homeStartedAt = now()
     }
 
     fun onHomeStop() {
         homeVisible = false
-        homeStartedAt?.let { start ->
-            val d = now() - start
-            homeTotal = SelfCounters(homeTotal.elapsedMs + d.elapsedMs, homeTotal.cpuMs + d.cpuMs, homeTotal.frames + d.frames)
-        }
-        homeStartedAt = null
-    }
-
-    /** 起動してからホームを表示していた間の合計。 */
-    fun homeTotals(): SelfCounters {
-        val running = homeStartedAt?.let { now() - it } ?: SelfCounters(0, 0, 0)
-        return SelfCounters(homeTotal.elapsedMs + running.elapsedMs, homeTotal.cpuMs + running.cpuMs, homeTotal.frames + running.frames)
     }
 }
 

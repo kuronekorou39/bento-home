@@ -12,7 +12,7 @@ class AppRowsTest {
     private val labels = mapOf("com.example.chat" to "チャット", "com.google.android.gms" to "Google Play 開発者サービス")
 
     private fun build(processes: List<ProcessLoad>, daily: DailyAppStats? = null) = AppRows.build(
-        processes, daily, emptyMap(), { packages[it].orEmpty() }, { labels[it] ?: it }, "com.rou39.bentohome",
+        processes, daily, { packages[it].orEmpty() }, { labels[it] ?: it }, "com.rou39.bentohome",
     )
 
     private fun proc(pid: Int, uid: Int, name: String, cpu: Float = 1f, rss: Long = 100) = ProcessLoad(pid, uid, name, cpu, rss)

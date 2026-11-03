@@ -1,6 +1,20 @@
 package com.rou39.bentohome.settings
 
 import android.content.Intent
+import android.view.MenuItem
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.unit.Dp
+import com.rou39.bentohome.home.AppIconView
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -34,6 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -54,13 +69,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,15 +84,19 @@ import androidx.lifecycle.lifecycleScope
 import com.rou39.bentohome.backup.BackupService
 import com.rou39.bentohome.backup.RestorePlan
 import com.rou39.bentohome.badge.BadgeListenerService
+import com.rou39.bentohome.catalog.AppEntry
 import com.rou39.bentohome.container
 import com.rou39.bentohome.data.BadgeMode
-import com.rou39.bentohome.data.GrayStages
 import com.rou39.bentohome.data.IconDisguise
 import com.rou39.bentohome.data.IconShape
 import com.rou39.bentohome.data.LabelSize
 import com.rou39.bentohome.data.LauncherSettings
+import com.rou39.bentohome.home.BadgeDisplay
+import com.rou39.bentohome.home.iconStyle
+import com.rou39.bentohome.layout.AppRef
 import com.rou39.bentohome.layout.GridSpec
 import com.rou39.bentohome.layout.LayoutEngine
+import com.rou39.bentohome.layout.Workspace
 import com.rou39.bentohome.monitor.MonitorActivity
 import kotlinx.coroutines.launch
 
@@ -85,13 +105,31 @@ private enum class SettingsPage(val title: String, val symbol: String) {
     HOME("ホーム画面", "▦"),
     ICONS("アイコン", "◐"),
     BADGES("通知バッジ", "●"),
-    USAGE("使用頻度とグレー表示", "◷"),
     BACKUP("バックアップ", "⇩"),
     MONITOR("システムモニター", "∿"),
 }
 
+/** プレビューに並べるアプリの数。 */
+private const val PREVIEW_APP_COUNT = 4
+
+/** 一覧の大きな行の、左の絵の場所と、その中のアイコンの大きさ。 */
+private val LARGE_NAV_LEADING = 56.dp
+private val NAV_ICON_SIZE = 44.dp
+private val LARGE_NAV_INDENT = 70.dp
+
+/** プレビューの横のページ送りボタンの高さ（プレビューの高さに対する割合）と、押せないときの濃さ。 */
+private const val PAGE_BUTTON_HEIGHT_RATIO = 0.5f
+private const val DISABLED_ALPHA = 0.3f
+
+/** 通知バッジのプレビューで使う件数（並びの順。null はバッジなし）。 */
+private val SAMPLE_BADGE_COUNTS = listOf(3, null, 12, 1)
+
+/** 頻度反映のプレビューで使う灰色の段階（並びの順）。使っていないアプリほど色が抜ける様子を見せる。 */
+private val SAMPLE_GRAY_LEVELS = listOf(0, 0, 1, 3)
+
 /**
  * 設定画面。最初は分野の一覧（今の値の要約つき）で、押すとその分野のページを開く。
+ * 見た目の設定は、説明文ではなく実際のアイコン・ホームの縮小表示で見せる。
  * 戻る操作で一覧へ戻る。既定のホームの切り替えは一覧から OS の設定を直接開く。
  */
 class SettingsActivity : ComponentActivity() {
@@ -99,9 +137,14 @@ class SettingsActivity : ComponentActivity() {
     private val settingsRepo by lazy { container.settingsRepository }
     private val workspaceRepo by lazy { container.workspaceRepository }
     private val usageRepo by lazy { container.usageRepository }
+    private val catalog by lazy { container.appCatalog }
+    private val iconCache by lazy { container.iconCache }
     private val backup by lazy { BackupService(this, container) }
 
     private var includeUsage by mutableStateOf(false)
+
+    /** 開いている分野。null なら一覧。タイトルバーの戻る矢印・戻る操作で一覧へ戻る。 */
+    private var page by mutableStateOf<SettingsPage?>(null)
     private var restorePlan by mutableStateOf<RestorePlan?>(null)
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -136,10 +179,13 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        page = savedInstanceState?.getString(KEY_PAGE)?.let { name -> SettingsPage.entries.firstOrNull { it.name == name } }
+        actionBar?.setDisplayHomeAsUpEnabled(true)
         setContent {
             val settings by settingsRepo.settings.collectAsState(initial = null)
+            val apps by catalog.apps.collectAsState()
+            val byRef by catalog.byRef.collectAsState()
             val scope = rememberCoroutineScope()
-            var page by rememberSaveable { mutableStateOf<SettingsPage?>(null) }
             var confirmClear by remember { mutableStateOf(false) }
             fun update(transform: (LauncherSettings) -> LauncherSettings) {
                 scope.launch { settingsRepo.update(transform) }
@@ -152,19 +198,25 @@ class SettingsActivity : ComponentActivity() {
                 // タイトルバーのある画面では領域の大きさが届かず 0 になる
                 Surface(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                     val s = settings ?: return@Surface
+                    // マス目・ドックを適用したら、ホームが並べ直した配置を読み直す
+                    val workspace by produceState<Workspace?>(null, s.baseColumns, s.baseRows, s.dockSlots) {
+                        value = workspaceRepo.load()
+                    }
+                    val sampleApps = remember(workspace, apps, byRef) { previewApps(workspace, apps, byRef) }
+                    // ホーム画面のページは縮小表示を画面に収めるので、縦に流さない
+                    val fixed = page == SettingsPage.HOME
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier
-                            .verticalScroll(rememberScrollState())
+                            .then(if (fixed) Modifier.fillMaxSize() else Modifier.verticalScroll(rememberScrollState()))
                             .padding(16.dp),
                     ) {
                         when (page) {
-                            null -> TopList(s, onOpen = { page = it })
-                            SettingsPage.HOME -> HomePage(s, ::update)
-                            SettingsPage.ICONS -> IconsPage(s, ::update)
-                            SettingsPage.BADGES -> BadgesPage(s, ::update)
-                            SettingsPage.USAGE -> UsagePage(s, ::update, onClear = { confirmClear = true })
-                            SettingsPage.BACKUP -> BackupPage()
+                            null -> TopList(s, sampleApps, onOpen = { page = it })
+                            SettingsPage.HOME -> HomePage(s, ::update, workspace, byRef, Modifier.weight(1f))
+                            SettingsPage.ICONS -> IconsPage(s, ::update, sampleApps)
+                            SettingsPage.BADGES -> BadgesPage(s, ::update, sampleApps)
+                            SettingsPage.BACKUP -> BackupPage(onClear = { confirmClear = true })
                             SettingsPage.MONITOR -> MonitorPage()
                         }
                     }
@@ -207,25 +259,57 @@ class SettingsActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        page?.let { outState.putString(KEY_PAGE, it.name) }
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId != android.R.id.home) return super.onOptionsItemSelected(item)
+        if (page != null) page = null else finish()
+        return true
+    }
+
     override fun onResume() {
         super.onResume()
         notificationAccess = BadgeListenerService.isAccessGranted(this)
     }
 
+    /** プレビューに使うアプリ。ドックのアプリを先に、足りなければ名前順で埋める。 */
+    private fun previewApps(workspace: Workspace?, apps: List<AppEntry>, byRef: Map<AppRef, AppEntry>): List<AppEntry> {
+        val dock = workspace?.dock.orEmpty().sortedBy { it.slot }.mapNotNull { byRef[it.app] }
+        return (dock + apps.sortedBy { it.label }).distinctBy { it.ref }.take(PREVIEW_APP_COUNT)
+    }
+
     // ---- 一覧 ----
 
     @Composable
-    private fun TopList(s: LauncherSettings, onOpen: (SettingsPage) -> Unit) {
+    private fun TopList(s: LauncherSettings, apps: List<AppEntry>, onOpen: (SettingsPage) -> Unit) {
+        // 見た目の分野は、記号ではなく今の設定で描いた小さな絵を付ける
+        val sample = apps.firstOrNull()
         Card {
-            NavRow(SettingsPage.HOME, homeSummary(s)) { onOpen(SettingsPage.HOME) }
-            NavDivider()
-            NavRow(SettingsPage.ICONS, iconsSummary(s)) { onOpen(SettingsPage.ICONS) }
-            NavDivider()
-            NavRow(SettingsPage.BADGES, "${if (notificationAccess) "許可済み" else "未許可"}・${s.badgeMode.label}") {
-                onOpen(SettingsPage.BADGES)
-            }
-            NavDivider()
-            NavRow(SettingsPage.USAGE, usageSummary(s)) { onOpen(SettingsPage.USAGE) }
+            LargeNavRow({ HomeGlyph(s) }, SettingsPage.HOME.title, homeSummary(s)) { onOpen(SettingsPage.HOME) }
+            NavDivider(LARGE_NAV_INDENT)
+            LargeNavRow(
+                { if (sample != null) AppIconView(sample, iconCache, NAV_ICON_SIZE, s.iconShape, null, labelSizeSp = null) },
+                SettingsPage.ICONS.title,
+                iconsSummary(s),
+            ) { onOpen(SettingsPage.ICONS) }
+            NavDivider(LARGE_NAV_INDENT)
+            LargeNavRow(
+                {
+                    if (sample != null) {
+                        val badge = when (s.badgeMode) {
+                            BadgeMode.NONE -> null
+                            BadgeMode.DOT -> BadgeDisplay.Dot
+                            BadgeMode.NUMBER -> BadgeDisplay.Count(3)
+                        }
+                        AppIconView(sample, iconCache, NAV_ICON_SIZE, s.iconShape, badge, labelSizeSp = null)
+                    }
+                },
+                SettingsPage.BADGES.title,
+                "${if (notificationAccess) "許可済み" else "未許可"}・${s.badgeMode.label}",
+            ) { onOpen(SettingsPage.BADGES) }
         }
         Card {
             NavRow(SettingsPage.BACKUP, "配置・設定を書き出す／読み込む") { onOpen(SettingsPage.BACKUP) }
@@ -250,117 +334,196 @@ class SettingsActivity : ComponentActivity() {
         add(s.iconShape.label)
         if (!s.labelVisible) add("ラベルなし")
         if (s.iconDisguise != IconDisguise.NONE) add("隠す: ${s.iconDisguise.label}")
+        if (s.usageReflected) add("頻度反映")
     }.joinToString("・")
-
-    private fun usageSummary(s: LauncherSettings) =
-        if (s.grayOnHome || s.grayInDrawer) "${s.grayStages.label}で薄く表示" else "薄く表示しない"
 
     // ---- 各ページ ----
 
+    /**
+     * ホーム画面。上に縮小表示、下に操作をまとめる。縮小表示が残りの高さに合わせて縮むので、縦に流れない。
+     * マス目とドックの枠数は「適用」で確定する（plan.md §5）。適用前の縮小表示は、適用後の並びを計算して描く。
+     */
     @Composable
-    private fun HomePage(s: LauncherSettings, update: ((LauncherSettings) -> LauncherSettings) -> Unit) {
-        Card("マス目とドック") {
-            GridEditor(s) { cols, rows, dock ->
-                update { it.copy(baseColumns = cols, baseRows = rows, dockSlots = dock) }
+    private fun HomePage(
+        s: LauncherSettings,
+        update: ((LauncherSettings) -> LauncherSettings) -> Unit,
+        workspace: Workspace?,
+        byRef: Map<AppRef, AppEntry>,
+        modifier: Modifier,
+    ) {
+        var cols by remember { mutableIntStateOf(s.baseColumns) }
+        var rows by remember { mutableIntStateOf(s.baseRows) }
+        var dock by remember { mutableIntStateOf(s.dockSlots) }
+        LaunchedEffect(s.baseColumns, s.baseRows, s.dockSlots) {
+            cols = s.baseColumns
+            rows = s.baseRows
+            dock = s.dockSlots
+        }
+        val changed = cols != s.baseColumns || rows != s.baseRows || dock != s.dockSlots
+        val grid = GridSpec(cols, rows, LauncherSettings.SUBDIVISIONS)
+        val gridChange = remember(workspace, cols, rows) {
+            workspace?.takeIf { cols != s.baseColumns || rows != s.baseRows }?.let { LayoutEngine.changeGrid(it, grid) }
+        }
+        val moved = (gridChange?.movedItemIds?.size ?: 0) + (workspace?.dock?.count { it.slot >= dock } ?: 0)
+
+        val previewWs = gridChange?.workspace ?: workspace
+        val pageCount by rememberUpdatedState(previewWs?.pages?.size?.coerceAtLeast(1) ?: 1)
+        val pagerState = rememberPagerState { pageCount }
+        val scope = rememberCoroutineScope()
+        val current = pagerState.currentPage
+        // 左右のボタンでもページを送る。ループするなら端から反対の端へ
+        fun go(delta: Int) {
+            scope.launch {
+                val n = pagerState.pageCount
+                val target = if (s.loopPages) (current + delta + n) % n else current + delta
+                if (target in 0 until n) pagerState.animateScrollToPage(target)
             }
         }
-        Card("操作") {
-            SwitchRow("配置をロック", "移動・削除・追加をしない", s.layoutLocked) { v -> update { it.copy(layoutLocked = v) } }
-            SwitchRow("ドックを表示", null, s.dockVisible) { v -> update { it.copy(dockVisible = v) } }
-            SwitchRow("下にスワイプで通知を開く", "ホームの背景で", s.swipeDownNotifications) { v ->
-                update { it.copy(swipeDownNotifications = v) }
+
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 鍵はプレビューの外、右上の角に置く（左右のボタンは縦の中ほどなので重ならない）
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    PageButton("‹", "前のページ", enabled = s.loopPages || current > 0) { go(-1) }
+                    HomePreview(
+                        workspace = previewWs,
+                        pagerState = pagerState,
+                        grid = grid,
+                        dockSlots = dock,
+                        dockVisible = s.dockVisible,
+                        loopPages = s.loopPages,
+                        shape = s.iconShape,
+                        byRef = byRef,
+                        cache = iconCache,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                    PageButton("›", "次のページ", enabled = s.loopPages || current < pageCount - 1) { go(1) }
+                }
+                LockToggle(
+                    locked = s.layoutLocked,
+                    onToggle = { update { it.copy(layoutLocked = !it.layoutLocked) } },
+                    modifier = Modifier.align(Alignment.TopEnd),
+                )
             }
-            SwitchRow("ページをループ", "最後のページの次を最初のページにする", s.loopPages) { v ->
-                update { it.copy(loopPages = v) }
+            Card {
+                // 左の数と右の切り替えの間に仕切りを入れ、＋ボタンとチップを離す
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.height(IntrinsicSize.Min),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StepperRow("列", cols, LauncherSettings.COLUMNS_RANGE) { cols = it }
+                        StepperRow("行", rows, LauncherSettings.ROWS_RANGE) { rows = it }
+                        StepperRow("ドック", dock, LauncherSettings.DOCK_SLOTS_RANGE, enabled = s.dockVisible) { dock = it }
+                    }
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    ToggleChips(
+                        listOf(
+                            Toggle("ドック", s.dockVisible) { v -> update { it.copy(dockVisible = v) } },
+                            Toggle("ページをループ", s.loopPages) { v -> update { it.copy(loopPages = v) } },
+                            Toggle("下スワイプで通知", s.swipeDownNotifications) { v -> update { it.copy(swipeDownNotifications = v) } },
+                        ),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                // 値を変えたときだけ出す行。場所は常に取っておき、出たときに全体がずれないようにする
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(if (changed) 1f else 0f)) {
+                    Text(
+                        when {
+                            !changed -> ""
+                            moved > 0 -> "${moved}個が移ります"
+                            else -> "そのまま収まります"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(enabled = changed, onClick = {
+                        cols = s.baseColumns
+                        rows = s.baseRows
+                        dock = s.dockSlots
+                    }) { Text("戻す") }
+                    Button(enabled = changed, onClick = { update { it.copy(baseColumns = cols, baseRows = rows, dockSlots = dock) } }) {
+                        Text("適用")
+                    }
+                }
             }
         }
     }
 
     @Composable
-    private fun IconsPage(s: LauncherSettings, update: ((LauncherSettings) -> LauncherSettings) -> Unit) {
-        Card("大きさと形") {
-            Text("大きさ  ${s.iconSizeDp}dp")
+    private fun IconsPage(s: LauncherSettings, update: ((LauncherSettings) -> LauncherSettings) -> Unit, apps: List<AppEntry>) {
+        IconRowPreview(
+            apps, iconCache, s.iconStyle(),
+            grayLevels = if (s.usageReflected) SAMPLE_GRAY_LEVELS else emptyList(),
+        )
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("大きさ", modifier = Modifier.weight(1f))
+                Text("${s.iconSizeDp}dp", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Slider(
                 value = s.iconSizeDp.toFloat(),
                 onValueChange = { v -> update { it.copy(iconSizeDp = v.toInt()) } },
                 valueRange = LauncherSettings.ICON_SIZE_RANGE.first.toFloat()..LauncherSettings.ICON_SIZE_RANGE.last.toFloat(),
                 steps = (LauncherSettings.ICON_SIZE_RANGE.last - LauncherSettings.ICON_SIZE_RANGE.first) / 4 - 1,
             )
-            Note("マス目に収まらない分は自動で縮めます。")
             Chips(IconShape.entries, s.iconShape, { it.label }) { v -> update { it.copy(iconShape = v) } }
-            Note("形は adaptive icon のアプリで最もきれいに効きます。古い形式のアイコンは白い背景に載せます。")
         }
-        Card("ラベル") {
-            SwitchRow("ラベルを表示", "アイコンの下のアプリ名", s.labelVisible) { v -> update { it.copy(labelVisible = v) } }
+        Card {
+            SwitchRow("ラベル", s.labelVisible) { v -> update { it.copy(labelVisible = v) } }
             if (s.labelVisible) {
                 Chips(LabelSize.entries, s.labelSize, { it.label }) { v -> update { it.copy(labelSize = v) } }
             }
         }
-        Card("アイコンを隠す（遊び）") {
+        Card {
+            Text("アイコンを隠す")
             Chips(IconDisguise.entries, s.iconDisguise, { it.label }) { v -> update { it.copy(iconDisguise = v) } }
             if (s.iconDisguise != IconDisguise.NONE) {
-                SwitchRow("つまんでいる間は見せる", "長押ししている間だけ元のアイコンにする", s.revealOnHold) { v ->
-                    update { it.copy(revealOnHold = v) }
-                }
+                SwitchRow("長押しの間は元のアイコン", s.revealOnHold) { v -> update { it.copy(revealOnHold = v) } }
             }
-            Note(
-                "ホーム・ドック・フォルダーのアイコンを、何のアプリか分からない見た目にします。アプリ一覧はそのままです。" +
-                    "名前も隠すなら「ラベルを表示」をオフに。アプリごとに対象外にするには、" +
-                    "アイコンを長押し →「外観の個別設定」→「アイコンを隠さない」。",
-            )
+        }
+        Card {
+            // 使っていないアプリを薄くする。段階の日数は既定のまま使う
+            SwitchRow("頻度反映", s.usageReflected) { v -> update { it.copy(grayOnHome = v, grayInDrawer = v) } }
         }
     }
 
     @Composable
-    private fun BadgesPage(s: LauncherSettings, update: ((LauncherSettings) -> LauncherSettings) -> Unit) {
-        Card("通知へのアクセス") {
-            Text(if (notificationAccess) "許可済み" else "未許可", style = MaterialTheme.typography.titleSmall)
-            Note(
-                "通知の内容を読める強い権限です。このアプリは件数の集計だけに使い、タイトル・本文・送信者を保存・記録しません。" +
-                    "バッジの数は今出ている通知の件数で、アプリ内の未読数とは一致しないことがあります。",
-            )
-            OutlinedButton(onClick = ::openNotificationAccess, modifier = Modifier.fillMaxWidth()) {
-                Text("通知へのアクセス設定を開く")
+    private fun BadgesPage(s: LauncherSettings, update: ((LauncherSettings) -> LauncherSettings) -> Unit, apps: List<AppEntry>) {
+        val badges = SAMPLE_BADGE_COUNTS.map { count ->
+            when {
+                count == null -> null
+                s.badgeMode == BadgeMode.DOT -> BadgeDisplay.Dot
+                s.badgeMode == BadgeMode.NUMBER -> BadgeDisplay.Count(count)
+                else -> null
             }
         }
-        Card("表示方式") {
+        IconRowPreview(apps, iconCache, s.iconStyle(), badges = badges)
+        Card {
             Chips(BadgeMode.entries, s.badgeMode, { it.label }) { m -> update { it.copy(badgeMode = m) } }
-            Note("アプリごとの表示方式は、アイコンの長押し →「外観の個別設定」で変えられます。")
+        }
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("通知へのアクセス")
+                    Note(if (notificationAccess) "許可済み" else "未許可（バッジは出ません）")
+                }
+                TextButton(onClick = ::openNotificationAccess) { Text("開く") }
+            }
         }
     }
 
     @Composable
-    private fun UsagePage(
-        s: LauncherSettings,
-        update: ((LauncherSettings) -> LauncherSettings) -> Unit,
-        onClear: () -> Unit,
-    ) {
-        Card("薄く表示する場所") {
-            SwitchRow("ホーム", null, s.grayOnHome) { v -> update { it.copy(grayOnHome = v) } }
-            SwitchRow("アプリ一覧", null, s.grayInDrawer) { v -> update { it.copy(grayInDrawer = v) } }
-        }
-        Card("薄くする段階（使っていない日数）") {
-            Chips(GrayStages.entries, s.grayStages, { it.label }) { v -> update { it.copy(grayStages = v) } }
-            Note("最初の日数で少し薄く、次の日数でさらに薄く、最後の日数で灰色にします。")
-            Note(
-                "起動できなくなることはありません。通知バッジのあるアプリ、「通常の色を維持」にしたアプリ、" +
-                    "観測を始めてから日が浅いアプリは薄くしません。",
-            )
-        }
-        Card("記録") {
-            Note(
-                "このランチャーから起動した回数と最終日時だけを端末内に記録します。通知・履歴画面・" +
-                    "他のアプリのリンクから開いた分は含みません。日別の件数は60日分だけ残します。",
-            )
-            OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) { Text("使用履歴を削除") }
-        }
-    }
-
-    @Composable
-    private fun BackupPage() {
+    private fun BackupPage(onClear: () -> Unit) {
         Card("書き出す") {
             Note("配置・設定・外観の個別設定をファイルに書き出します。保存先は自分で選びます。画像の具材は含みません。")
-            SwitchRow("使用履歴も含める", null, includeUsage) { includeUsage = it }
+            SwitchRow("使用履歴も含める", includeUsage) { includeUsage = it }
             Button(
                 onClick = { exportLauncher.launch("bento-home-${java.time.LocalDate.now()}.json") },
                 modifier = Modifier.fillMaxWidth(),
@@ -373,6 +536,9 @@ class SettingsActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("読み込む") }
         }
+        Card("使用履歴") {
+            OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) { Text("使用履歴を削除") }
+        }
     }
 
     @Composable
@@ -381,9 +547,7 @@ class SettingsActivity : ComponentActivity() {
         Card {
             NavRow("∿", "システムモニター", "CPU・メモリ・通信・温度・アプリごとの負荷") { openMonitor(null) }
             NavDivider()
-            NavRow("▤", "アプリの棚卸し", "入っているアプリを使い方で見直す") { openMonitor(MonitorActivity.TAB_INVENTORY) }
-            NavDivider()
-            NavRow("⊙", "Bento について", "Bento 自身の権限・保存データ・負荷") { openMonitor(MonitorActivity.TAB_BENTO) }
+            NavRow("▤", "アプリの棚卸し", "入っているアプリを使い方で見直す") { openMonitor(MonitorActivity.TAB_APPS) }
         }
     }
 
@@ -403,50 +567,14 @@ class SettingsActivity : ComponentActivity() {
             .onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
     }
 
-    /**
-     * マス目の数とドックの枠数。変更は「適用」で確定する（plan.md §5）。
-     * 適用前に、収まらずに移る項目の数を現在の配置から計算して見せる。項目は削除されず、ホームで取り消せる。
-     */
-    @Composable
-    private fun GridEditor(s: LauncherSettings, onApply: (cols: Int, rows: Int, dock: Int) -> Unit) {
-        var cols by remember { mutableIntStateOf(s.baseColumns) }
-        var rows by remember { mutableIntStateOf(s.baseRows) }
-        var dock by remember { mutableIntStateOf(s.dockSlots) }
-        LaunchedEffect(s.baseColumns, s.baseRows, s.dockSlots) {
-            cols = s.baseColumns
-            rows = s.baseRows
-            dock = s.dockSlots
-        }
-        val changed = cols != s.baseColumns || rows != s.baseRows || dock != s.dockSlots
-        val preview by produceState<String?>(null, cols, rows, dock, changed) {
-            if (!changed) {
-                value = null
-                return@produceState
-            }
-            val ws = workspaceRepo.load()
-            val grid = GridSpec(cols, rows, LauncherSettings.SUBDIVISIONS)
-            val change = LayoutEngine.changeGrid(ws, grid)
-            val dockOverflow = ws.dock.count { it.slot >= dock }
-            val parts = buildList {
-                if (change.movedItemIds.isNotEmpty()) add("${change.movedItemIds.size}個の項目が別の位置へ移ります")
-                if (change.resizedItemIds.isNotEmpty()) add("${change.resizedItemIds.size}個のウィジェットが小さくなります")
-                if (dockOverflow > 0) add("ドックから外れる${dockOverflow}個のアプリはホームへ移ります")
-            }
-            value = if (parts.isEmpty()) "今の配置はそのまま収まります。" else parts.joinToString("。") + "。ホームで取り消せます。"
-        }
-        Stepper("列", cols, LauncherSettings.COLUMNS_RANGE) { cols = it }
-        Stepper("行", rows, LauncherSettings.ROWS_RANGE) { rows = it }
-        Stepper("ドックの枠", dock, LauncherSettings.DOCK_SLOTS_RANGE) { dock = it }
-        preview?.let { Note(it) }
-        Button(onClick = { onApply(cols, rows, dock) }, enabled = changed, modifier = Modifier.fillMaxWidth()) {
-            Text("マス目とドックを適用")
-        }
-    }
-
     private companion object {
         const val DEFAULT_TITLE = "Bento Home 設定"
+        const val KEY_PAGE = "page"
     }
 }
+
+/** 使っていないアプリを薄く表示するか（頻度反映）。ホームと一覧をまとめて切り替える。 */
+private val LauncherSettings.usageReflected: Boolean get() = grayOnHome || grayInDrawer
 
 // ---- 部品 ----
 
@@ -505,8 +633,65 @@ private fun NavRow(symbol: String, title: String, summary: String, onClick: () -
 }
 
 @Composable
-private fun NavDivider() {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(start = 50.dp))
+private fun NavDivider(indent: Dp = 50.dp) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(start = indent))
+}
+
+/** 一覧の大きな行。左の絵だけで何の設定か分かるようにする。 */
+@Composable
+private fun LargeNavRow(leading: @Composable () -> Unit, title: String, summary: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(LARGE_NAV_LEADING).clearAndSetSemantics { },
+        ) { leading() }
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("›", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clearAndSetSemantics { })
+    }
+}
+
+/** ホーム画面の小さな絵。今のマス目の数とドックの有無で描く。 */
+@Composable
+private fun HomeGlyph(s: LauncherSettings) {
+    val frame = MaterialTheme.colorScheme.secondaryContainer
+    val mark = MaterialTheme.colorScheme.onSecondaryContainer
+    Canvas(Modifier.size(width = 36.dp, height = 56.dp)) {
+        val w = size.width
+        val h = size.height
+        drawRoundRect(frame, cornerRadius = CornerRadius(w * 0.2f))
+        val pad = w * 0.14f
+        val dockH = if (s.dockVisible) h * 0.12f else 0f
+        val gridH = h - pad * 2 - dockH - (if (s.dockVisible) pad * 0.6f else 0f)
+        val cw = (w - pad * 2) / s.baseColumns
+        val ch = gridH / s.baseRows
+        val dot = minOf(cw, ch) * 0.5f
+        for (c in 0 until s.baseColumns) for (r in 0 until s.baseRows) {
+            drawRoundRect(
+                mark.copy(alpha = 0.55f),
+                topLeft = Offset(pad + c * cw + (cw - dot) / 2, pad + r * ch + (ch - dot) / 2),
+                size = Size(dot, dot),
+                cornerRadius = CornerRadius(dot * 0.3f),
+            )
+        }
+        if (s.dockVisible) {
+            drawRoundRect(
+                mark.copy(alpha = 0.35f),
+                topLeft = Offset(pad, h - pad - dockH),
+                size = Size(w - pad * 2, dockH),
+                cornerRadius = CornerRadius(dockH * 0.4f),
+            )
+        }
+    }
 }
 
 /** 補足の説明。小さく、色を抑える。 */
@@ -516,7 +701,7 @@ private fun Note(text: String) {
 }
 
 @Composable
-private fun SwitchRow(label: String, description: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     // 文字を押しても切り替わるよう、行全体を押せるようにする（スイッチ自体は押しても行に任せる）
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -525,21 +710,81 @@ private fun SwitchRow(label: String, description: String?, checked: Boolean, onC
             .toggleable(value = checked, role = Role.Switch, onValueChange = onChange)
             .padding(vertical = 2.dp),
     ) {
-        Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(label)
-            if (description != null) Note(description)
-        }
+        Text(label, modifier = Modifier.weight(1f).padding(end = 12.dp))
         Switch(checked = checked, onCheckedChange = null)
     }
 }
 
+/** 増減の操作の1行。名前・−・値・＋。 */
 @Composable
-private fun Stepper(label: String, value: Int, range: IntRange, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Text(label, modifier = Modifier.weight(1f))
-        OutlinedButton(onClick = { onChange(value - 1) }, enabled = value > range.first) { Text("−") }
-        Text("$value", modifier = Modifier.width(40.dp), textAlign = TextAlign.Center)
-        OutlinedButton(onClick = { onChange(value + 1) }, enabled = value < range.last) { Text("＋") }
+private fun StepperRow(label: String, value: Int, range: IntRange, enabled: Boolean = true, onChange: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(54.dp),
+        )
+        FilledTonalIconButton(
+            onClick = { onChange(value - 1) },
+            enabled = enabled && value > range.first,
+            modifier = Modifier.size(34.dp).semantics { contentDescription = "${label}を減らす" },
+        ) { Text("−") }
+        Text(
+            "$value",
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(30.dp),
+        )
+        FilledTonalIconButton(
+            onClick = { onChange(value + 1) },
+            enabled = enabled && value < range.last,
+            modifier = Modifier.size(34.dp).semantics { contentDescription = "${label}を増やす" },
+        ) { Text("＋") }
+    }
+}
+
+/** プレビューの横の、縦長のページ送りボタン。 */
+@Composable
+private fun PageButton(symbol: String, label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .width(36.dp)
+            .fillMaxHeight(PAGE_BUTTON_HEIGHT_RATIO)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+    ) {
+        Text(
+            symbol,
+            fontSize = 26.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else DISABLED_ALPHA),
+            modifier = Modifier.clearAndSetSemantics { },
+        )
+    }
+}
+
+/** オンオフの切り替え。プレビューで結果が見えるものは、スイッチの行ではなく小さなチップで縦に並べる。 */
+private class Toggle(val label: String, val checked: Boolean, val onChange: (Boolean) -> Unit)
+
+@Composable
+private fun ToggleChips(toggles: List<Toggle>, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        for (t in toggles) {
+            FilterChip(
+                selected = t.checked,
+                onClick = { t.onChange(!t.checked) },
+                label = { Text(t.label, maxLines = 1) },
+                leadingIcon = if (t.checked) {
+                    { Text("✓") }
+                } else {
+                    null
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

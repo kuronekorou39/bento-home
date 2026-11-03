@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -116,17 +115,14 @@ fun HomeShortcutCell(controller: HomeController, item: WorkspaceItem, shortcut: 
         ShortcutIconView(shortcut, controller, iconSize, style.labelSizeSp.takeIf { style.labelVisible })
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            BentoMenuItem("提供元のアプリ情報", MenuSymbol.INFO, onClick = {
-                menuOpen = false
-                vm.catalog.openAppInfo(shortcut.packageName, shortcut.profileSerial)
-            })
-            SelectMenuItem(controller, item.id, close = { menuOpen = false })
-            if (!controller.locked) {
-                BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
-                    menuOpen = false
-                    vm.removeItem(item.id)
-                })
-            }
+            val close = { menuOpen = false }
+            BentoMenuActions(
+                homeItemActions(controller, item.id, close) +
+                    MenuAction("提供元のアプリ情報", MenuSymbol.INFO) {
+                        close()
+                        vm.catalog.openAppInfo(shortcut.packageName, shortcut.profileSerial)
+                    },
+            )
         }
     }
 }

@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -163,22 +162,16 @@ fun HomeFolderCell(
             disguiseFor = { controller.disguiseFor(it, controller.isHeld(DragSource.Item(item.id), menuOpen)) },
         )
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
+        // 開くのはタップで足りるので、メニューには出さない
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            BentoMenuItem("開く", MenuSymbol.OPEN, onClick = {
-                menuOpen = false
-                controller.openFolder(item.id)
-            })
-            BentoMenuItem("名前を変更", MenuSymbol.RENAME, onClick = {
-                menuOpen = false
-                controller.openFolder(item.id, rename = true)
-            })
-            SelectMenuItem(controller, item.id, close = { menuOpen = false })
-            if (!controller.locked) {
-                BentoMenuItem("ホームから削除（中のアプリも）", MenuSymbol.REMOVE, onClick = {
-                    menuOpen = false
-                    controller.vm.removeItem(item.id)
-                })
-            }
+            val close = { menuOpen = false }
+            BentoMenuActions(
+                homeItemActions(controller, item.id, close, removeLabel = "ホームから削除（中のアプリも）") +
+                    MenuAction("名前を変更", MenuSymbol.RENAME) {
+                        close()
+                        controller.openFolder(item.id, rename = true)
+                    },
+            )
         }
     }
 }
@@ -312,14 +305,15 @@ private fun FolderAppCell(
             disguise = controller.disguiseFor(app, controller.isHeld(DragSource.FolderApp(folderItemId, app), menuOpen)),
         )
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
-            if (!controller.locked) {
-                BentoMenuItem("フォルダーから出す", MenuSymbol.TAKE_OUT, onClick = {
-                    menuOpen = false
+            val close = { menuOpen = false }
+            val lead = listOfNotNull(
+                MenuAction("フォルダーから出す", MenuSymbol.TAKE_OUT) {
+                    close()
                     controller.closeFolder()
                     vm.takeOutOfFolder(folderItemId, app)
-                })
-            }
+                }.takeIf { !controller.locked },
+            )
+            AppMenu(controller, entry, close, lead = lead, gray = gray)
         }
     }
 }

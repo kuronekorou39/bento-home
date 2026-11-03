@@ -115,11 +115,25 @@ fun Modifier.launcherItemGestures(key: Any, callbacks: ItemGestureCallbacks): Mo
         }
 }
 
+/**
+ * 指の位置を、前のイベントからの移動量で進めて速さの記録に入れる。まとめて届いた途中の位置（historical）も入れる。
+ * 位置はどれも同じイベントの座標系なので、差を取ればページが動いたぶんは消える。
+ */
+private fun trackFinger(tracker: VelocityTracker, change: PointerInputChange, finger: Offset): Offset {
+    val base = finger - change.previousPosition
+    change.historical.forEach { tracker.addPosition(it.uptimeMillis, base + it.position) }
+    val next = base + change.position
+    // 指を離したイベントは入れない（標準のドラッグと同じ）。離すまでに間が空くと、指が止まったとみなされて速さが 0 になる
+    if (change.pressed) tracker.addPosition(change.uptimeMillis, next)
+    return next
+}
+
 /** ウィジェット上の横ドラッグを、ページ送りとして受け取る先。 */
 class PagerDragHandler(
+    /** 前のスワイプで寄せている途中なら止める（止めないと指の動きと引っ張り合う）。 */
+    val onDragStart: () -> Unit,
     val onDrag: (dx: Float) -> Unit,
-    /** totalDx は指を動かした合計。端のページで外へめくったかを見るのに使う（ページは動かない）。 */
-    val onDragEnd: (velocityX: Float, totalDx: Float) -> Unit,
+    val onDragEnd: (velocityX: Float) -> Unit,
 )
 
 /**
@@ -149,16 +163,24 @@ fun Modifier.widgetGestures(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 var horizontal = false
-                var slopRoot = Offset.Zero
+                // 指の位置は「前のイベントからの移動量」を積み上げて持つ。移動量はページが動いても変わらないが、
+                // 項目の座標から換算すると、ページと一緒に動くぶんがずれて払う速さが 0 になる。
+                // 速さは触れた瞬間から指を離す直前までの全部の動きで測る（途中が抜けると、短く払っても送られない）
+                var finger = down.position
+                val tracker = VelocityTracker()
+                tracker.addPosition(down.uptimeMillis, finger)
                 val ended = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         if (!change.pressed) break
-                        val delta = change.position - down.position
+                        finger = trackFinger(tracker, change, finger)
+                        val delta = finger - down.position
                         if (delta.getDistance() > viewConfiguration.touchSlop) {
                             horizontal = abs(delta.x) > abs(delta.y)
-                            slopRoot = holder.coords?.localToRoot(change.position) ?: Offset.Zero
+                            // ページャーも同じイベントで横ドラッグを始めてしまうので、ここで取る。
+                            // 取らないと、ページャーがすぐ打ち切られて元のページへ戻すアニメーションを始め、指と引っ張り合う
+                            if (horizontal) change.consume()
                             break
                         }
                     }
@@ -188,25 +210,19 @@ fun Modifier.widgetGestures(
                         if (dragging) cb.onDragEnd() else cb.onLongPress()
                     }
                     horizontal -> {
-                        // ページが動くとウィジェット自身も動くので、移動量はルート座標で測る
-                        val tracker = VelocityTracker()
-                        val downRoot = coords.localToRoot(down.position)
-                        pager.onDrag(slopRoot.x - downRoot.x)
-                        var lastRoot = slopRoot
-                        var totalDx = slopRoot.x - downRoot.x
+                        pager.onDragStart()
+                        pager.onDrag(finger.x - down.position.x)
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             event.changes.forEach { it.consume() }
                             val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change != null && change.pressed) {
-                                val root = coords.localToRoot(change.position)
-                                pager.onDrag(root.x - lastRoot.x)
-                                totalDx += root.x - lastRoot.x
-                                tracker.addPosition(change.uptimeMillis, root)
-                                lastRoot = root
+                            if (change != null) {
+                                val before = finger
+                                finger = trackFinger(tracker, change, finger)
+                                if (change.pressed) pager.onDrag(finger.x - before.x)
                             }
                         } while (event.changes.any { it.pressed })
-                        pager.onDragEnd(tracker.calculateVelocity().x, totalDx)
+                        pager.onDragEnd(tracker.calculateVelocity().x)
                     }
                     else -> Unit
                 }

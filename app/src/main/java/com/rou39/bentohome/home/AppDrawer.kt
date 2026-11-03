@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +70,8 @@ private val DRAWER_ICON_SIZE = 52.dp
 private val SELECTED_COLOR = Color.White.copy(alpha = 0.16f)
 private const val HIDDEN_ALPHA = 0.45f
 private val HOME_MARK_COLOR = Color.White.copy(alpha = 0.8f)
+private val PLACED_DOT_SIZE = 4.dp
+private val PLACED_DOT_COLOR = Color.White.copy(alpha = 0.7f)
 
 /**
  * アプリがホームのどこにあるか（一覧の印とメニューに使う）。ページ・フォルダーの中・ドックを見る。
@@ -349,13 +350,15 @@ private fun DrawerTile(
                 ),
             ),
     ) {
-        AppIconView(
-            entry, controller.vm.iconCache, DRAWER_ICON_SIZE, style.shape, badge,
-            labelSizeSp = style.labelSizeSp,
-            modifier = Modifier.padding(horizontal = 4.dp),
-            grayLevel = gray?.level ?: 0,
-        )
-        if (placement != null) HomeMark(Modifier.align(Alignment.TopStart).padding(8.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            AppIconView(
+                entry, controller.vm.iconCache, DRAWER_ICON_SIZE, style.shape, badge,
+                labelSizeSp = style.labelSizeSp,
+                modifier = Modifier.padding(horizontal = 4.dp),
+                grayLevel = gray?.level ?: 0,
+            )
+            PlacedDot(visible = placement != null)
+        }
         if (selected) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -374,19 +377,22 @@ private fun DrawerTile(
                 controller.drawerMenuRef = null
             },
         ) {
-            if (placement != null) {
-                BentoMenuNote("${placement}にあります")
-                HorizontalDivider()
-            }
-            if (!controller.locked && !selectMode) {
-                BentoMenuItem("ホームに追加", MenuSymbol.ADD, onClick = {
-                    menuOpen = false
+            val close = { menuOpen = false }
+            val lead = listOfNotNull(
+                MenuAction("ホームに追加", MenuSymbol.ADD) {
+                    close()
                     controller.vm.addAppToHome(entry.ref)
                     // 一覧を閉じて、置いた場所を光らせて見せる
                     controller.drawerOpen = false
-                })
-            }
-            AppMenuItems(controller, entry, close = { menuOpen = false }, gray = gray)
+                }.takeIf { !controller.locked && !selectMode },
+            )
+            AppMenu(
+                controller, entry, close,
+                lead = lead,
+                gray = gray,
+                notes = listOfNotNull(placement?.let { "${it}にあります" }),
+                uninstall = true,
+            )
         }
     }
 }
@@ -419,7 +425,22 @@ private fun SelectionBar(controller: HomeController) {
     }
 }
 
-/** ホームに置いてあるアプリの印（小さな家の形）。 */
+/**
+ * 一覧で、ホームに置いてあるアプリの名前の下に付ける小さな点。
+ * 名前を読む流れで目に入るよう、アイコンから離さない。点の無いアプリも同じ高さを空けて、段をそろえる。
+ */
+@Composable
+private fun PlacedDot(visible: Boolean) {
+    Box(
+        Modifier
+            .padding(top = 3.dp)
+            .size(PLACED_DOT_SIZE)
+            .clip(CircleShape)
+            .background(if (visible) PLACED_DOT_COLOR else Color.Transparent),
+    )
+}
+
+/** ホームに置いてあるものの印（小さな家の形）。ウィジェットの一覧で、文字の横に添える。 */
 @Composable
 internal fun HomeMark(modifier: Modifier = Modifier) {
     Canvas(modifier.size(14.dp)) {

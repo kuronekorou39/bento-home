@@ -141,9 +141,18 @@ fun HomeGarnishCell(controller: HomeController, item: WorkspaceItem, garnish: It
         if (controller.isHeld(DragSource.Item(item.id), menuOpen)) HoldHighlight()
         BentoMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             if (controller.locked) {
-                BentoMenuItem("配置はロック中です", MenuSymbol.LOCK, onClick = { menuOpen = false })
+                BentoMenuNote("配置はロック中です")
                 return@BentoMenu
             }
+            val close = { menuOpen = false }
+            BentoMenuActions(
+                homeItemActions(controller, item.id, close) +
+                    MenuAction("サイズ変更", MenuSymbol.RESIZE) {
+                        close()
+                        controller.resizingItemId = item.id
+                    },
+            )
+            BentoMenuDivider()
             BentoMenuNote("はみ出し ${"%.2f".format(garnish.scale).trimEnd('0').trimEnd('.')} 倍")
             BentoMenuItem(
                 "はみ出しを大きく", MenuSymbol.GROW,
@@ -155,15 +164,6 @@ fun HomeGarnishCell(controller: HomeController, item: WorkspaceItem, garnish: It
                 onClick = { vm.setGarnishScale(item.id, garnish.scale - SCALE_STEP) },
                 enabled = garnish.scale > ItemContent.Garnish.MIN_SCALE,
             )
-            BentoMenuItem("サイズ変更", MenuSymbol.RESIZE, onClick = {
-                menuOpen = false
-                controller.resizingItemId = item.id
-            })
-            SelectMenuItem(controller, item.id, close = { menuOpen = false })
-            BentoMenuItem("ホームから削除", MenuSymbol.REMOVE, onClick = {
-                menuOpen = false
-                vm.removeItem(item.id)
-            })
         }
     }
 }

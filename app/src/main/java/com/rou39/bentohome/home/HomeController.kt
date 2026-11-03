@@ -1,12 +1,14 @@
 package com.rou39.bentohome.home
 
+import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import com.rou39.bentohome.catalog.AppEntry
@@ -21,7 +23,7 @@ import com.rou39.bentohome.monitor.WidgetMetrics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -148,19 +150,59 @@ class HomeController(
     /** 最後のページの次を最初のページにするか（設定、plan.md §10）。 */
     var loopPages by mutableStateOf(false)
 
+    /** 実際のページの数（置き先として足す空のページは数えない）。 */
+    var realPageCount by mutableIntStateOf(0)
+
     /**
-     * 端のページで外へめくったら反対の端へ移る。アイコンを運んでいる間はしない（末尾に置き先のページを出すため）。
-     * @param forward 最後のページで左へめくった（次へ進む向き）なら true
+     * ループ中は、ページャーの両端に反対の端のページの複製を置く。
+     * 並びは [最後の複製, 1ページ目, …, 最後のページ, 最初の複製]。複製でページ送りが止まったら、
+     * 同じ見た目の本物のページへ一瞬で移る（[normalizeLoopCopy]）。普通のページ送りと同じ動きでつながる。
+     * アイコンを運んでいる間は、末尾の複製の代わりに置き先の空のページを置く。
      */
-    fun wrapPage(forward: Boolean) {
-        if (!loopPages || drag.active) return
-        val count = pagerState.pageCount
-        if (count < 2) return
-        scope.launch {
-            // 指を離した直後はページャー自身の寄せる動きが走り、こちらの移動を打ち消すので、終わってから動かす
-            snapshotFlow { pagerState.isScrollInProgress }.first { !it }
-            pagerState.animateScrollToPage(if (forward) 0 else count - 1)
+    val loopActive: Boolean get() = loopPages && realPageCount >= 2
+
+    /** ページャーの位置 → 実際のページの番号。運んでいる間の末尾の空のページは [realPageCount]。 */
+    fun realIndex(virtual: Int): Int = if (!loopActive) {
+        virtual
+    } else {
+        when {
+            virtual <= 0 -> realPageCount - 1
+            virtual <= realPageCount -> virtual - 1
+            drag.active -> realPageCount
+            else -> 0
         }
+    }
+
+    /** 実際のページの番号 → ページャーの位置（本物のページ）。 */
+    fun virtualIndex(real: Int): Int = if (loopActive) real + 1 else real
+
+    /** ページャーのその位置が、ループのための複製か。 */
+    fun isLoopCopy(virtual: Int): Boolean =
+        loopActive && (virtual == 0 || (virtual == realPageCount + 1 && !drag.active))
+
+    /** 本物のページに対応する複製の位置。無ければ null。 */
+    fun loopCopyOf(real: Int): Int? = when {
+        !loopActive -> null
+        real == realPageCount - 1 -> 0
+        real == 0 && !drag.active -> realPageCount + 1
+        else -> null
+    }
+
+    /** 今のページ（実際のページの番号）。 */
+    val currentRealPage: Int get() = realIndex(pagerState.currentPage)
+
+    /** ページャーが止まった位置が複製なら、本物のページへ移す。見た目は同じなので切り替わりは見えない。 */
+    suspend fun normalizeLoopCopy() {
+        val page = pagerState.currentPage
+        if (!pagerState.isScrollInProgress && !widgetPaging && isLoopCopy(page)) pagerState.scrollToPage(virtualIndex(realIndex(page)))
+    }
+
+    /** ウィジェットの上の横ドラッグでページを動かしている間か。この間はページャーがスクロール中にならない。 */
+    private var widgetPaging = false
+
+    /** そのページへ動かす（実際のページの番号）。 */
+    fun scrollToRealPage(real: Int) {
+        scope.launch { pagerState.scrollToPage(virtualIndex(real)) }
     }
 
     /** 具材を選ぶダイアログを開いているか。 */
@@ -221,7 +263,7 @@ class HomeController(
         measureResult = null
         resetKey++
         heldSource = null
-        if (toFirstPage) scope.launch { pagerState.scrollToPage(0) }
+        if (toFirstPage) scrollToRealPage(0)
     }
 
     /**
@@ -352,7 +394,7 @@ class HomeController(
         }
         val area = geometry.gridArea
         if (area.width <= 0f || !area.contains(p)) return DropTarget.None
-        val pageIndex = pagerState.currentPage
+        val pageIndex = currentRealPage
         val grid = ws.pageAt(pageIndex)?.grid ?: vm.currentGrid()
         val cellW = area.width / grid.columns
         val cellH = area.height / grid.rows
@@ -387,16 +429,14 @@ class HomeController(
 
     /** ウィジェット上の横ドラッグでページを動かす。 */
     val pagerDrag = PagerDragHandler(
+        onDragStart = {
+            widgetPaging = true
+            scope.launch(start = CoroutineStart.UNDISPATCHED) { pagerState.stopScroll(MutatePriority.UserInput) }
+        },
         onDrag = { dx -> pagerState.dispatchRawDelta(-dx) },
-        onDragEnd = { velocity, totalDx ->
-            val last = pagerState.pageCount - 1
-            val atEdge = pagerState.currentPageOffsetFraction == 0f
-            when {
-                // ウィジェットの上の横ドラッグでも、端のページで外へめくったら反対の端へ
-                loopPages && atEdge && pagerState.currentPage == last && totalDx < -LOOP_THRESHOLD_PX -> wrapPage(forward = true)
-                loopPages && atEdge && pagerState.currentPage == 0 && totalDx > LOOP_THRESHOLD_PX -> wrapPage(forward = false)
-                else -> settle(velocity)
-            }
+        onDragEnd = { velocity ->
+            widgetPaging = false
+            settle(velocity)
         },
     )
 
@@ -410,6 +450,7 @@ class HomeController(
                 else -> position.roundToInt().toFloat()
             }.toInt().coerceIn(0, (pagerState.pageCount - 1).coerceAtLeast(0))
             pagerState.animateScrollToPage(target)
+            normalizeLoopCopy()
         }
     }
 
@@ -430,7 +471,5 @@ class HomeController(
     }
 }
 
-/** 端のページでこれ以上外へめくったら、反対の端へ移る（px、plan.md §10）。 */
-internal const val LOOP_THRESHOLD_PX = 160f
 
 data class MeasureResult(val itemId: Long, val label: String, val measurement: WidgetMeasurement)
