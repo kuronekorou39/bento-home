@@ -2,6 +2,11 @@ package com.rou39.bentohome.settings
 
 import android.content.Intent
 import android.view.MenuItem
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.platform.LocalContext
+import com.rou39.bentohome.data.ThemePalette
+import com.rou39.bentohome.ui.swatchColors
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -58,8 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
+import com.rou39.bentohome.ui.BentoTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -193,7 +197,7 @@ class SettingsActivity : ComponentActivity() {
             // タイトルバーに今のページの名前を出す
             LaunchedEffect(page) { title = page?.title ?: DEFAULT_TITLE }
             BackHandler(enabled = page != null) { page = null }
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            BentoTheme {
                 // 上下の領域は最初の描画で読む。設定の読み込みを待ってから読むと、
                 // タイトルバーのある画面では領域の大きさが届かず 0 になる
                 Surface(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -285,6 +289,7 @@ class SettingsActivity : ComponentActivity() {
 
     @Composable
     private fun TopList(s: LauncherSettings, apps: List<AppEntry>, onOpen: (SettingsPage) -> Unit) {
+        val scope = rememberCoroutineScope()
         // 見た目の分野は、記号ではなく今の設定で描いた小さな絵を付ける
         val sample = apps.firstOrNull()
         Card {
@@ -310,6 +315,9 @@ class SettingsActivity : ComponentActivity() {
                 SettingsPage.BADGES.title,
                 "${if (notificationAccess) "許可済み" else "未許可"}・${s.badgeMode.label}",
             ) { onOpen(SettingsPage.BADGES) }
+        }
+        Card("テーマの色") {
+            PaletteSwatches(s.themePalette) { v -> scope.launch { settingsRepo.update { it.copy(themePalette = v) } } }
         }
         Card {
             NavRow(SettingsPage.BACKUP, "配置・設定を書き出す／読み込む") { onOpen(SettingsPage.BACKUP) }
@@ -621,9 +629,9 @@ private fun NavRow(symbol: String, title: String, summary: String, onClick: () -
             modifier = Modifier
                 .size(36.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.secondaryContainer)
+                .background(MaterialTheme.colorScheme.primaryContainer)
                 .clearAndSetSemantics { },
-        ) { Text(symbol, color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 16.sp) }
+        ) { Text(symbol, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 16.sp) }
         Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -663,8 +671,8 @@ private fun LargeNavRow(leading: @Composable () -> Unit, title: String, summary:
 /** ホーム画面の小さな絵。今のマス目の数とドックの有無で描く。 */
 @Composable
 private fun HomeGlyph(s: LauncherSettings) {
-    val frame = MaterialTheme.colorScheme.secondaryContainer
-    val mark = MaterialTheme.colorScheme.onSecondaryContainer
+    val frame = MaterialTheme.colorScheme.primaryContainer
+    val mark = MaterialTheme.colorScheme.onPrimaryContainer
     Canvas(Modifier.size(width = 36.dp, height = 56.dp)) {
         val w = size.width
         val h = size.height
@@ -712,6 +720,46 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     ) {
         Text(label, modifier = Modifier.weight(1f).padding(end = 12.dp))
         Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+/** 配色の見本。主の色と添える色を半分ずつ塗った丸を並べ、押すとすぐ切り替わる。 */
+@Composable
+private fun PaletteSwatches(selected: ThemePalette, onSelect: (ThemePalette) -> Unit) {
+    val context = LocalContext.current
+    val dark = isSystemInDarkTheme()
+    Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+        for (palette in ThemePalette.entries) {
+            val (main, sub) = remember(palette, dark) { swatchColors(palette, dark, context) }
+            val chosen = palette == selected
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .selectable(selected = chosen, role = Role.RadioButton, onClick = { onSelect(palette) })
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                Canvas(
+                    Modifier
+                        .size(44.dp)
+                        .border(
+                            width = if (chosen) 3.dp else 1.dp,
+                            color = if (chosen) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape,
+                        )
+                        .padding(if (chosen) 5.dp else 2.dp),
+                ) {
+                    drawArc(main, startAngle = 90f, sweepAngle = 180f, useCenter = true)
+                    drawArc(sub, startAngle = 270f, sweepAngle = 180f, useCenter = true)
+                }
+                Text(
+                    palette.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (chosen) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

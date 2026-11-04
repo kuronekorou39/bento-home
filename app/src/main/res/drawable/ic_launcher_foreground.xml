@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- アプリアイコンの前景。弁当の仕切りと具材、梅干し（docs/logo.svg） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M35,30 H47 A5,5 0 0 1 52,35 V73 A5,5 0 0 1 47,78 H35 A5,5 0 0 1 30,73 V35 A5,5 0 0 1 35,30 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="30" android:startY="30"
+                android:endX="30" android:endY="78"
+                android:startColor="#FFFFFFFF" android:endColor="#FFE6E1D4" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M61,30 H73 A5,5 0 0 1 78,35 V47 A5,5 0 0 1 73,52 H61 A5,5 0 0 1 56,47 V35 A5,5 0 0 1 61,30 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="56" android:startY="30"
+                android:endX="56" android:endY="52"
+                android:startColor="#FFFFFFFF" android:endColor="#FFE6E1D4" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M61,56 H73 A5,5 0 0 1 78,61 V73 A5,5 0 0 1 73,78 H61 A5,5 0 0 1 56,73 V61 A5,5 0 0 1 61,56 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="56" android:startY="56"
+                android:endX="56" android:endY="78"
+                android:startColor="#FFFFFFFF" android:endColor="#FFE6E1D4" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M63,34 H71 A3,3 0 0 1 74,37 V45 A3,3 0 0 1 71,48 H63 A3,3 0 0 1 60,45 V37 A3,3 0 0 1 63,34 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="60" android:startY="34"
+                android:endX="74" android:endY="48"
+                android:startColor="#FF2F4690" android:endColor="#FF16214A" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M63,60 H71 A3,3 0 0 1 74,63 V71 A3,3 0 0 1 71,74 H63 A3,3 0 0 1 60,71 V63 A3,3 0 0 1 63,60 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="60" android:startY="60"
+                android:endX="74" android:endY="74"
+                android:startColor="#FF2F4690" android:endColor="#FF16214A" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M33.5,54 A7.5,7.5 0 1 1 48.5,54 A7.5,7.5 0 1 1 33.5,54 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial"
+                android:centerX="39.2" android:centerY="51.3"
+                android:gradientRadius="11.25"
+                android:startColor="#FFF6D98C" android:endColor="#FFB3812C" />
+        </aapt:attr>
+    </path>
+</vector>

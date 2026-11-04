@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,8 +27,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** 長押しメニューの背景。少し透かして、下のホームが分かるようにする。 */
-private val MENU_COLOR = Color(0xD92A2A32)
+/** 長押しメニューの背景の不透明度。少し透かして、下のホームが分かるようにする。 */
+private const val MENU_ALPHA = 0.88f
 private val MENU_SYMBOL_COLOR = Color.White.copy(alpha = 0.75f)
 private val MENU_DIVIDER_COLOR = Color.White.copy(alpha = 0.12f)
 
@@ -79,7 +80,7 @@ fun BentoMenu(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
-        containerColor = MENU_COLOR,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = MENU_ALPHA),
         content = content,
     )
 }

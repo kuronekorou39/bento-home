@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- テーマアイコン用の単色の形。仕切りを塗り、おかずと梅干しは抜く -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="M35,30 H47 A5,5 0 0 1 52,35 V73 A5,5 0 0 1 47,78 H35 A5,5 0 0 1 30,73 V35 A5,5 0 0 1 35,30 Z M33.5,54 A7.5,7.5 0 1 1 48.5,54 A7.5,7.5 0 1 1 33.5,54 Z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="M61,30 H73 A5,5 0 0 1 78,35 V47 A5,5 0 0 1 73,52 H61 A5,5 0 0 1 56,47 V35 A5,5 0 0 1 61,30 Z M63,34 H71 A3,3 0 0 1 74,37 V45 A3,3 0 0 1 71,48 H63 A3,3 0 0 1 60,45 V37 A3,3 0 0 1 63,34 Z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="M61,56 H73 A5,5 0 0 1 78,61 V73 A5,5 0 0 1 73,78 H61 A5,5 0 0 1 56,73 V61 A5,5 0 0 1 61,56 Z M63,60 H71 A3,3 0 0 1 74,63 V71 A3,3 0 0 1 71,74 H63 A3,3 0 0 1 60,71 V63 A3,3 0 0 1 63,60 Z" />
+</vector>

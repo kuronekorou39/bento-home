@@ -13,8 +13,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
+import com.rou39.bentohome.ui.BentoTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,7 +70,7 @@ class HomeActivity : ComponentActivity() {
         container.selfMetrics.observe(window)
 
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            BentoTheme(dark = true) {
                 Box {
                     HomeScreen(
                         vm = vm,

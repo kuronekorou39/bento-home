@@ -56,6 +56,14 @@ enum class GrayStages(val days: List<Int>) {
  * ホームのアイコンを何のアプリか分からなくする見せ方（遊びの機能）。
  * 隠すのはホーム・ドック・フォルダーだけで、アプリ一覧は元のまま。
  */
+/** アプリ全体の配色（ui/BentoTheme.kt）。 */
+enum class ThemePalette(val label: String) {
+    BENTO("Bento"),
+    LACQUER("漆"),
+    WALLPAPER("壁紙の色"),
+    STANDARD("標準"),
+}
+
 enum class IconDisguise(val label: String) {
     NONE("しない"),
     COLOR("代表色の丸"),
@@ -92,6 +100,8 @@ data class LauncherSettings(
     val iconDisguise: IconDisguise = IconDisguise.NONE,
     /** 隠していても、長押しでつまんでいる間は元のアイコンを見せる。 */
     val revealOnHold: Boolean = true,
+    /** アプリ全体の配色。 */
+    val themePalette: ThemePalette = ThemePalette.BENTO,
 ) {
     companion object {
         const val SUBDIVISIONS = 2
@@ -126,6 +136,7 @@ class SettingsRepository(private val context: Context) {
         val loopPages = booleanPreferencesKey("loop_pages")
         val iconDisguise = stringPreferencesKey("icon_disguise")
         val revealOnHold = booleanPreferencesKey("reveal_on_hold")
+        val themePalette = stringPreferencesKey("theme_palette")
         /**
          * ウィジェットの一覧に出さない提供元（ComponentName.flattenToString()）。
          * "app:パッケージ名" はアプリごと隠したもの（後から増えたウィジェットも隠す）。
@@ -156,6 +167,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.loopPages] = s.loopPages
             p[Keys.iconDisguise] = s.iconDisguise.name
             p[Keys.revealOnHold] = s.revealOnHold
+            p[Keys.themePalette] = s.themePalette.name
         }
     }
 
@@ -198,6 +210,7 @@ class SettingsRepository(private val context: Context) {
             loopPages = p[Keys.loopPages] ?: d.loopPages,
             iconDisguise = enumOr(p[Keys.iconDisguise], d.iconDisguise),
             revealOnHold = p[Keys.revealOnHold] ?: d.revealOnHold,
+            themePalette = enumOr(p[Keys.themePalette], d.themePalette),
         )
     }
 
