@@ -112,3 +112,7 @@ Bento Home は通知の**件数を数えるだけ**で、タイトルや本文�
 - 設計: [plan.md](plan.md)、[docs/design.md](docs/design.md)
 - ビルド・署名・インストール・権限の付与: [docs/operations.md](docs/operations.md)
 - システムモニターの仕組み: [docs/monitor.md](docs/monitor.md)
+
+## ライセンス
+
+[MIT](LICENSE)
